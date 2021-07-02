@@ -10,3 +10,4 @@ Added versions 1.0.0 to 12.0.3
 - Update of the FS module
 
 From now on the changelog will be modified at each update to detail the modifications of the firmwares at their release.
+The technical details of the updates will be discussed in the wiki.
