@@ -8,7 +8,7 @@ Firmware database for a discord bot
 
 # More information
 
-More information will be detailed in the wiki, both the new versions that will be released, as well as their technical details.
+More information will be detailed in the [wiki](https://github.com/THZoria/NX_Firmware/wiki), both the new versions that will be released, as well as their technical details.
 
 # To find us
 
