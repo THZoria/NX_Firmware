@@ -19,4 +19,5 @@ More information will be detailed in the [wiki](https://github.com/THZoria/NX_Fi
 
 Our bot, currently developed in Discord JS V13 : 
 
-file:///home/sayuki/Images/poyo.png![poyo](https://discord.com/api/oauth2/authorize?client_id=854048178907512884&permissions=4294967287&scope=bot%20applications.commands)
+![poyo](https://user-images.githubusercontent.com/50277488/156135958-a87fadb8-841e-4eec-bfb8-32340417fa17.png https://discord.com/api/oauth2/authorize?client_id=854048178907512884&permissions=4294967287&scope=bot%20applications.commands)
+
