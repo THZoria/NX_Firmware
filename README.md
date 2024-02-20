@@ -4,7 +4,7 @@ Firmware for the Nintendo Switch
 # Utility
 Firmware database for a discord bot
 
-![poyo](https://user-images.githubusercontent.com/50277488/236132968-64851d87-828a-4ff7-ac47-b3663009e468.png)
+![poyo](https://github.com/THZoria/NX_Firmware/assets/50277488/1426abac-3031-460d-a119-3b8051331bd9)
 
 # More information
 
