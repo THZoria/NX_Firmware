@@ -18,8 +18,6 @@ Firmware database for a discord bot
 - Click Continue, then Preserve Settings, then Install (FAT32+exFAT), then Continue again.
 - Wait a few moments (DayBreak is installing your update) and finally, click Reboot to restart your Nintendo Switch.
 
-Translated with DeepL.com (free version)
-
 # More information
 
 More information will be detailed in the [wiki](https://github.com/THZoria/NX_Firmware/wiki), both the new versions that will be released, as well as their technical details.
