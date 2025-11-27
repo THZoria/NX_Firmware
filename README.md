@@ -4,7 +4,7 @@ Firmware for the Nintendo Switch
 # Utility
 Firmware database for a discord bot
 
-<img width="763" height="881" alt="image" src="https://github.com/user-attachments/assets/06bdcbda-a7cd-4100-b7bc-bb757e4bfc5d" />
+<img width="787" height="819" alt="image" src="https://github.com/user-attachments/assets/e338a3f5-e54b-4ae0-be8c-524944f1855b" />
 
 # How to update a modified Switch / Under custom firmware
 
