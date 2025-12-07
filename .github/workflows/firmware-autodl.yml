@@ -1,4 +1,4 @@
-name: Firmware Auto Downloader
+name: 🎮 Firmware Auto Downloader
 
 on:
   #schedule:
@@ -34,9 +34,6 @@ jobs:
       - name: 🔍 Check firmware version (Switch 1 only)
         id: version_check
         run: |
-          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
-          echo "Last known version (tag): $LAST_TAG"
-
           LATEST_TITLE=$(curl -s 'https://yls8.mtheall.com/ninupdates/feed.php' | \
                          grep '<title>Switch ' | \
                          grep -v '<title>Switch 2 ' | \
@@ -48,15 +45,16 @@ jobs:
           fi
 
           LATEST_VERSION=$(echo "$LATEST_TITLE" | grep -oP 'Switch \K[0-9.]+')
-          echo "Latest version found (RSS): $LATEST_VERSION"
 
           if [ -z "$LATEST_VERSION" ]; then
             echo "::error::Failed to parse LATEST_VERSION from title: $LATEST_TITLE"
             exit 1
           fi
 
-          if [ "$LATEST_VERSION" == "$LAST_TAG" ]; then
-            echo "INFO: Version $LATEST_VERSION is already tagged. Exiting."
+          TAG_EXISTS=$(git ls-remote --tags origin $LATEST_VERSION)
+
+          if [ ! -z "$TAG_EXISTS" ]; then
+            echo "INFO: Tag $LATEST_VERSION already exists on GitHub. Stopping workflow to avoid re-upload."
             echo "new_version=false" >> $GITHUB_OUTPUT
           else
             echo "INFO: New version $LATEST_VERSION found! Preparing to download..."
