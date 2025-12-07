@@ -1,0 +1,107 @@
+name: Firmware Auto Downloader
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  download_and_release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: ⬇️ Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🐍 Setup Python and dependencies
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      
+      - name: ⚙️ Install required Python modules
+        run: |
+          pip install requests anynet beautifulsoup4
+
+      - name: ⬇️ Setup hactool-linux
+        run: |
+          cp hactool-linux hactool
+          chmod +x hactool
+          
+      - name: 🔍 Check firmware version (Switch 1 only)
+        id: version_check
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
+          echo "Last known version (tag): $LAST_TAG"
+
+          LATEST_TITLE=$(curl -s 'https://yls8.mtheall.com/ninupdates/feed.php' | \
+                         grep '<title>Switch ' | \
+                         grep -v '<title>Switch 2 ' | \
+                         head -n 1)
+
+          if [ -z "$LATEST_TITLE" ]; then
+            echo "::error::Could not retrieve the firmware title for Switch 1 from the RSS feed."
+            exit 1 
+          fi
+
+          LATEST_VERSION=$(echo "$LATEST_TITLE" | grep -oP 'Switch \K[0-9.]+')
+          echo "Latest version found (RSS): $LATEST_VERSION"
+
+          if [ -z "$LATEST_VERSION" ]; then
+            echo "::error::Failed to parse LATEST_VERSION from title: $LATEST_TITLE"
+            exit 1
+          fi
+
+          if [ "$LATEST_VERSION" == "$LAST_TAG" ]; then
+            echo "INFO: Version $LATEST_VERSION is already tagged. Exiting."
+            echo "new_version=false" >> $GITHUB_OUTPUT
+          else
+            echo "INFO: New version $LATEST_VERSION found! Preparing to download..."
+            echo "new_version=true" >> $GITHUB_OUTPUT
+          fi
+        shell: bash
+
+      - name: 💻 Execute download script and capture changelog
+        id: download
+        if: steps.version_check.outputs.new_version == 'true'
+        run: |
+          python3 firmware_downloader.py | tee firmware_output.txt
+          
+          FIRMWARE_VERSION=$(grep 'Folder: Firmware ' firmware_output.txt | awk '{print $NF}')
+          
+          echo "firmware_version=$FIRMWARE_VERSION" >> $GITHUB_OUTPUT
+
+          tail -n 4 firmware_output.txt > changelog_body.txt
+          
+      - name: 📝 Prepare Release Body
+        id: prepare_body
+        if: steps.version_check.outputs.new_version == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const changelogBody = fs.readFileSync('changelog_body.txt', 'utf8');
+            core.setOutput('release_body', changelogBody);
+
+      - name: 📦 Create Tag and Release
+        if: steps.version_check.outputs.new_version == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.download.outputs.firmware_version }}
+          name: Firmware ${{ steps.download.outputs.firmware_version }}
+          body: |
+            Automatic download of the official Nintendo Switch firmware version **${{ steps.download.outputs.firmware_version }}**.
+            
+            ---
+            
+            **Downloaded file details:**
+            
+            ${{ steps.prepare_body.outputs.release_body }}
+            
+          files: |
+            Firmware ${{ steps.download.outputs.firmware_version }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
