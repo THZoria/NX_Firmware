@@ -84,6 +84,16 @@ jobs:
             const changelogBody = fs.readFileSync('changelog_body.txt', 'utf8');
             core.setOutput('release_body', changelogBody);
 
+      - name: 📦 Create firmware zip (exclude .nca.1)
+        if: steps.version_check.outputs.new_version == 'true'
+        run: |
+          EXCLUDED=$(find "Firmware ${{ steps.download.outputs.firmware_version }}" -name "*.nca.1" | wc -l)
+          echo "Excluded $EXCLUDED variant files from zip"
+
+          zip -r "Firmware ${{ steps.download.outputs.firmware_version }}.zip" \
+            "Firmware ${{ steps.download.outputs.firmware_version }}" \
+            -x "*.nca.1"
+
       - name: 📦 Create Tag and Release
         if: steps.version_check.outputs.new_version == 'true'
         uses: softprops/action-gh-release@v2
@@ -99,6 +109,9 @@ jobs:
             
             ${{ steps.prepare_body.outputs.release_body }}
             
+            ---
+            
+            ℹ️ Excluded variant files (.nca.1): see workflow logs
           files: |
             Firmware ${{ steps.download.outputs.firmware_version }}.zip
         env:
