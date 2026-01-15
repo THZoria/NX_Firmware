@@ -6,6 +6,10 @@ Firmware database for a discord bot
 
 <img width="618" height="670" alt="image" src="https://github.com/user-attachments/assets/279d9c21-0712-4ea8-927b-c6bb9789bb1b" />
 
+[![Discord](https://img.shields.io/discord/454099185416011776?label=Rejoindre%20le%20Discord&logo=discord&logoColor=white&style=for-the-badge)](https://discord.sighya.fr) <br>
+[![Dernière version](https://img.shields.io/github/v/release/THZoria/NX_Firmware?label=Dernière%20Version&color=05c09a&style=for-the-badge)](https://github.com/THZoria/NX_Firmware/releases/latest)
+[![Téléchargements](https://img.shields.io/github/downloads/THZoria/NX_Firmware/total?label=Téléchargements&color=blue&style=for-the-badge)](https://github.com/THZoria/NX_Firmware)
+
 # How to update a modified Switch / Under custom firmware
 
 - Create a folder at the root of your microSD card and name it whatever you want.
