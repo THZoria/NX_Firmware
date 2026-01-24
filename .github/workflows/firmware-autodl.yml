@@ -31,33 +31,34 @@ jobs:
           cp hactool-linux hactool
           chmod +x hactool
           
-      - name: 🔍 Check firmware version (Switch 1 only)
+      - name: 🔍 Check firmware version (Switch 1 only, 21.0.0+)
         id: version_check
         run: |
           LATEST_TITLE=$(curl -s 'https://yls8.mtheall.com/ninupdates/feed.php' | \
                          grep '<title>Switch ' | \
                          grep -v '<title>Switch 2 ' | \
+                         grep -E 'Switch ([2-9][1-9]|[3-9][0-9])\.' | \
                          head -n 1)
 
           LATEST_VERSION=$(echo "$LATEST_TITLE" | grep -oP 'Switch \K[0-9.]+')
 
           if [ -z "$LATEST_VERSION" ]; then
-            echo "ERREUR: Impossible de récupérer la version."
-            exit 1
+            echo "INFO: Aucune version récente (>= 21.x) trouvée."
+            echo "new_version=false" >> $GITHUB_OUTPUT
+            exit 0
           fi
 
-          echo "Version sur le flux RSS : $LATEST_VERSION"
+          echo "Version détectée : $LATEST_VERSION"
 
-          # Vérification via l'API GitHub si la release existe
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/$LATEST_VERSION")
 
           if [ "$HTTP_STATUS" == "200" ]; then
-            echo "INFO: La release $LATEST_VERSION existe déjà. On stoppe tout."
+            echo "INFO: La release $LATEST_VERSION existe déjà."
             echo "new_version=false" >> $GITHUB_OUTPUT
           else
-            echo "INFO: Nouvelle version détectée : $LATEST_VERSION"
+            echo "INFO: Nouvelle version $LATEST_VERSION détectée !"
             echo "new_version=true" >> $GITHUB_OUTPUT
           fi
         shell: bash
