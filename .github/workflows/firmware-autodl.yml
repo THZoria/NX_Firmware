@@ -17,67 +17,92 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 🐍 Setup Python
+      - name: 🐍 Setup Python and dependencies
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
+      
+      - name: ⚙️ Install required Python modules
+        run: |
+          pip install requests anynet beautifulsoup4
 
-      - name: ⚙️ Install dependencies
-        run: pip install requests anynet beautifulsoup4
-
-      - name: 🔧 Setup hactool
+      - name: ⬇️ Setup hactool-linux
         run: |
           cp hactool-linux hactool
           chmod +x hactool
-
-      - name: 🔍 Check latest Switch 1 firmware
+          
+      - name: 🔍 Check firmware version (Switch 1 only)
         id: version_check
-        shell: bash
         run: |
-          LATEST_TITLE=$(curl -s 'https://yls8.mtheall.com/ninupdates/feed.php' | grep '<title>Switch ' | grep -v '<title>Switch 2 ' | head -n 1)
-          LATEST_VERSION=$(echo "$LATEST_TITLE" | grep -oP 'Switch \K[0-9.]+')
+          LATEST_TITLE=$(curl -s 'https://yls8.mtheall.com/ninupdates/feed.php' | \
+                         grep '<title>Switch ' | \
+                         grep -v '<title>Switch 2 ' | \
+                         head -n 1)
 
-          if git ls-remote --tags origin "$LATEST_VERSION" | grep -q "$LATEST_VERSION"; then
-            echo "new_version=false" >> $GITHUB_OUTPUT
-            exit 0
+          if [ -z "$LATEST_TITLE" ]; then
+            exit 1 
           fi
 
-          echo "new_version=true" >> $GITHUB_OUTPUT
+          LATEST_VERSION=$(echo "$LATEST_TITLE" | grep -oP 'Switch \K[0-9.]+')
 
-      - name: ⬇️ Download firmware
+          if [ -z "$LATEST_VERSION" ]; then
+            exit 1
+          fi
+
+          TAG_EXISTS=$(git ls-remote --tags origin $LATEST_VERSION)
+
+          if [ ! -z "$TAG_EXISTS" ]; then
+            echo "new_version=false" >> $GITHUB_OUTPUT
+          else
+            echo "new_version=true" >> $GITHUB_OUTPUT
+          fi
+        shell: bash
+
+      - name: 💻 Execute download script and capture changelog
+        id: download
         if: steps.version_check.outputs.new_version == 'true'
         run: |
           python3 firmware_downloader.py | tee firmware_output.txt
+          FIRMWARE_VERSION=$(grep 'Folder: Firmware ' firmware_output.txt | awk '{print $NF}')
+          echo "firmware_version=$FIRMWARE_VERSION" >> $GITHUB_OUTPUT
+          tail -n 4 firmware_output.txt > changelog_body.txt
 
-      - name: 🧹 Remove .nca.1 files
+      - name: 🧹 Clean .nca files
         if: steps.version_check.outputs.new_version == 'true'
         run: |
-          FOLDER=$(ls -d Firmware\ *)
-          find "$FOLDER" -name "*.nca.1" -delete
+          find . -type f -name "*.nca.*" -delete
+          VERSION="${{ steps.download.outputs.firmware_version }}"
+          if [ -f "Firmware $VERSION.zip" ]; then
+            rm "Firmware $VERSION.zip"
+            zip -r "Firmware $VERSION.zip" "Firmware $VERSION" -i "*.nca"
+          fi
 
-      - name: 📝 Prepare changelog
+      - name: 📝 Prepare Release Body
+        id: prepare_body
         if: steps.version_check.outputs.new_version == 'true'
-        run: |
-          {
-            echo "### Notes"
-            echo "- Official Nintendo Switch firmware download"
-            echo ""
-            tail -n 4 firmware_output.txt
-          } > release_body.txt
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const changelogBody = fs.readFileSync('changelog_body.txt', 'utf8');
+            core.setOutput('release_body', changelogBody);
 
-      - name: 📦 Create firmware zip
-        if: steps.version_check.outputs.new_version == 'true'
-        run: |
-          FOLDER=$(ls -d Firmware\ *)
-          zip -r "$FOLDER.zip" "$FOLDER"
-
-      - name: 🚀 Create GitHub Release
+      - name: 📦 Create Tag and Release
         if: steps.version_check.outputs.new_version == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.run_id }}
-          name: Firmware Release
-          body_path: release_body.txt
-          files: Firmware\ *.zip
+          tag_name: ${{ steps.download.outputs.firmware_version }}
+          name: Firmware ${{ steps.download.outputs.firmware_version }}
+          body: |
+            Automatic download of the official Nintendo Switch firmware version **${{ steps.download.outputs.firmware_version }}**.
+            
+            ---
+            
+            **Downloaded file details:**
+            
+            ${{ steps.prepare_body.outputs.release_body }}
+            
+          files: |
+            Firmware ${{ steps.download.outputs.firmware_version }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
