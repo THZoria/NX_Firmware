@@ -42,14 +42,22 @@ jobs:
           LATEST_VERSION=$(echo "$LATEST_TITLE" | grep -oP 'Switch \K[0-9.]+')
 
           if [ -z "$LATEST_VERSION" ]; then
+            echo "ERREUR: Impossible de récupérer la version."
             exit 1
           fi
 
-          TAG_EXISTS=$(git ls-remote --tags origin "$LATEST_VERSION")
+          echo "Version sur le flux RSS : $LATEST_VERSION"
 
-          if [ ! -z "$TAG_EXISTS" ]; then
+          # Vérification via l'API GitHub si la release existe
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$LATEST_VERSION")
+
+          if [ "$HTTP_STATUS" == "200" ]; then
+            echo "INFO: La release $LATEST_VERSION existe déjà. On stoppe tout."
             echo "new_version=false" >> $GITHUB_OUTPUT
           else
+            echo "INFO: Nouvelle version détectée : $LATEST_VERSION"
             echo "new_version=true" >> $GITHUB_OUTPUT
           fi
         shell: bash
@@ -80,8 +88,10 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const changelogBody = fs.readFileSync('changelog_body.txt', 'utf8');
-            core.setOutput('release_body', changelogBody);
+            if (fs.existsSync('changelog_body.txt')) {
+              const changelogBody = fs.readFileSync('changelog_body.txt', 'utf8');
+              core.setOutput('release_body', changelogBody);
+            }
 
       - name: 📦 Create Tag and Release
         if: steps.version_check.outputs.new_version == 'true'
