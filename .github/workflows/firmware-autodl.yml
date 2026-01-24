@@ -43,7 +43,6 @@ jobs:
           fi
 
           echo "new_version=true" >> $GITHUB_OUTPUT
-          echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
 
       - name: ⬇️ Download firmware
         if: steps.version_check.outputs.new_version == 'true'
@@ -53,7 +52,7 @@ jobs:
       - name: 🧹 Remove .nca.1 files
         if: steps.version_check.outputs.new_version == 'true'
         run: |
-          FOLDER="Firmware ${{ steps.version_check.outputs.version }}"
+          FOLDER=$(ls -d Firmware\ *)
           find "$FOLDER" -name "*.nca.1" -delete
 
       - name: 📝 Prepare changelog
@@ -69,16 +68,16 @@ jobs:
       - name: 📦 Create firmware zip
         if: steps.version_check.outputs.new_version == 'true'
         run: |
-          zip -r "Firmware ${{ steps.version_check.outputs.version }}.zip" \
-            "Firmware ${{ steps.version_check.outputs.version }}"
+          FOLDER=$(ls -d Firmware\ *)
+          zip -r "$FOLDER.zip" "$FOLDER"
 
       - name: 🚀 Create GitHub Release
         if: steps.version_check.outputs.new_version == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version_check.outputs.version }}
-          name: Firmware ${{ steps.version_check.outputs.version }}
+          tag_name: ${{ github.run_id }}
+          name: Firmware Release
           body_path: release_body.txt
-          files: Firmware ${{ steps.version_check.outputs.version }}.zip
+          files: Firmware\ *.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
