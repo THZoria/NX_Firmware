@@ -34,26 +34,16 @@ jobs:
       - name: 🔍 Check firmware version (Switch 1 only)
         id: version_check
         run: |
-          LATEST_TITLE=$(curl -s 'https://yls8.mtheall.com/ninupdates/feed.php' | \
-                         grep '<title>Switch ' | \
-                         grep -v '<title>Switch 2 ' | \
-                         head -n 1)
-
-          if [ -z "$LATEST_TITLE" ]; then
-            exit 1 
-          fi
-
-          LATEST_VERSION=$(echo "$LATEST_TITLE" | grep -oP 'Switch \K[0-9.]+')
+          LATEST_VERSION=$(curl -s 'https://yls8.mtheall.com/ninupdates/feed.php' | \
+                           grep -oP '<title>Switch \K[0-9.]+(?=</title>)' | \
+                           head -n 1)
 
           if [ -z "$LATEST_VERSION" ]; then
             exit 1
           fi
 
-          TAG_EXISTS=$(git ls-remote --tags origin $LATEST_VERSION)
-
-          if [ ! -z "$TAG_EXISTS" ]; then
+          if git rev-parse "$LATEST_VERSION" >/dev/null 2>&1; then
             echo "new_version=false" >> $GITHUB_OUTPUT
-            echo "Version $LATEST_VERSION already exists. Skipping."
           else
             echo "new_version=true" >> $GITHUB_OUTPUT
           fi
