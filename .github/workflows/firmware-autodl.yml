@@ -36,13 +36,16 @@ jobs:
         run: |
           LATEST_VERSION=$(curl -s 'https://yls8.mtheall.com/ninupdates/feed.php' | \
                            grep -oP '<title>Switch \K[0-9.]+(?=</title>)' | \
+                           grep -v '^2' | \
                            head -n 1)
 
           if [ -z "$LATEST_VERSION" ]; then
             exit 1
           fi
 
-          if git rev-parse "$LATEST_VERSION" >/dev/null 2>&1; then
+          TAG_EXISTS=$(git ls-remote --tags origin refs/tags/$LATEST_VERSION)
+
+          if [ ! -z "$TAG_EXISTS" ]; then
             echo "new_version=false" >> $GITHUB_OUTPUT
           else
             echo "new_version=true" >> $GITHUB_OUTPUT
