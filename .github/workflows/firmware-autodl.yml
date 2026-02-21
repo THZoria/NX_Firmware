@@ -1,9 +1,9 @@
-name: 🎮 Firmware Auto Downloader
+name: 🎮 Firmware Auto Downloader (21.0.0+)
 
 on:
   schedule:
-    - cron: '0 * * * *'
-  workflow_dispatch:
+    - cron: '0 * * * *' # Vérifie toutes les heures
+  workflow_dispatch: # Permet de lancer manuellement depuis l'onglet Actions
 
 jobs:
   download_and_release:
@@ -17,39 +17,47 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 🐍 Setup Python and dependencies
+      - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
       
       - name: ⚙️ Install required Python modules
         run: |
-          pip install requests anynet beautifulsoup4
+          pip install requests anynet beautifulsoup4 pycryptodome
 
       - name: ⬇️ Setup hactool-linux
         run: |
-          cp hactool-linux hactool
+          if [ -f "hactool-linux" ]; then
+            cp hactool-linux hactool
+          else
+            echo "ERREUR: hactool-linux absent du dépôt"
+            exit 1
+          fi
           chmod +x hactool
           
-      - name: 🔍 Check firmware version (Switch 1 only, 21.0.0+)
+      - name: 🔍 Check firmware version (Filter: 21.0.0+)
         id: version_check
         run: |
-          LATEST_TITLE=$(curl -s 'https://yls8.mtheall.com/ninupdates/feed.php' | \
-                         grep '<title>Switch ' | \
-                         grep -v '<title>Switch 2 ' | \
-                         grep -E 'Switch ([2-9][1-9]|[3-9][0-9])\.' | \
-                         head -n 1)
-
-          LATEST_VERSION=$(echo "$LATEST_TITLE" | grep -oP 'Switch \K[0-9.]+')
+          # 1. Récupérer le flux RSS de NinUpdates
+          RSS_FEED=$(curl -s 'https://yls8.mtheall.com/ninupdates/feed.php')
+          
+          # 2. Extraire la version en ignorant explicitement 19.x et 20.x
+          # La regex '^([2-9][1-9]|[3-9][0-9])' impose un nombre >= 21
+          LATEST_VERSION=$(echo "$RSS_FEED" | \
+            grep -oP '<title>Switch \K[0-9.]+' | \
+            grep -E '^([2-9][1-9]|[3-9][0-9])\.' | \
+            head -n 1)
 
           if [ -z "$LATEST_VERSION" ]; then
-            echo "INFO: Aucune version récente (>= 21.x) trouvée."
+            echo "INFO: Aucune nouvelle version majeure (>= 21.0.0) détectée."
             echo "new_version=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          echo "Version détectée : $LATEST_VERSION"
+          echo "Version majeure détectée : $LATEST_VERSION"
 
+          # 3. Vérifier si cette version a déjà été publiée dans tes Releases
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/$LATEST_VERSION")
@@ -58,58 +66,56 @@ jobs:
             echo "INFO: La release $LATEST_VERSION existe déjà."
             echo "new_version=false" >> $GITHUB_OUTPUT
           else
-            echo "INFO: Nouvelle version $LATEST_VERSION détectée !"
+            echo "INFO: NOUVELLE VERSION $LATEST_VERSION DETECTEE !"
             echo "new_version=true" >> $GITHUB_OUTPUT
+            echo "latest_v=$LATEST_VERSION" >> $GITHUB_OUTPUT
           fi
         shell: bash
 
-      - name: 💻 Execute download script and capture changelog
+      - name: 💻 Execute download script
         id: download
         if: steps.version_check.outputs.new_version == 'true'
         run: |
-          python3 firmware_downloader.py | tee firmware_output.txt
-          FIRMWARE_VERSION=$(grep 'Folder: Firmware ' firmware_output.txt | awk '{print $NF}')
+          # On lance le script avec la version détectée
+          python3 firmware_downloader.py "${{ steps.version_check.outputs.latest_v }}" | tee firmware_output.txt
+          
+          # On récupère le nom exact du dossier créé
+          FIRMWARE_VERSION=$(grep 'Folder: Firmware ' firmware_output.txt | awk '{print $NF}' || echo "${{ steps.version_check.outputs.latest_v }}")
           echo "firmware_version=$FIRMWARE_VERSION" >> $GITHUB_OUTPUT
-          tail -n 4 firmware_output.txt > changelog_body.txt
+          
+          # Extraction d'un mini log pour la description de la release
+          tail -n 15 firmware_output.txt > changelog_body.txt
 
-      - name: 🧹 Clean .nca files
+      - name: 🧹 Zip Firmware
         if: steps.version_check.outputs.new_version == 'true'
         run: |
-          find . -type f -name "*.nca.*" -delete
           VERSION="${{ steps.download.outputs.firmware_version }}"
-          if [ -d "Firmware $VERSION" ]; then
-            rm -f "Firmware $VERSION.zip"
-            zip -rj "Firmware $VERSION.zip" "Firmware $VERSION/" -i "*.nca"
+          # Trouve le dossier (ex: "Firmware 21.0.0")
+          DIR_NAME=$(ls -d Firmware*${VERSION}* | head -n 1)
+          
+          if [ -d "$DIR_NAME" ]; then
+            zip -rj "Firmware_$VERSION.zip" "$DIR_NAME/"
+          else
+            echo "ERREUR: Dossier $DIR_NAME introuvable après téléchargement"
+            exit 1
           fi
 
-      - name: 📝 Prepare Release Body
-        id: prepare_body
-        if: steps.version_check.outputs.new_version == 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            if (fs.existsSync('changelog_body.txt')) {
-              const changelogBody = fs.readFileSync('changelog_body.txt', 'utf8');
-              core.setOutput('release_body', changelogBody);
-            }
-
-      - name: 📦 Create Tag and Release
+      - name: 📦 Create Release on GitHub
         if: steps.version_check.outputs.new_version == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.download.outputs.firmware_version }}
           name: Firmware ${{ steps.download.outputs.firmware_version }}
           body: |
-            Automatic download of the official Nintendo Switch firmware version **${{ steps.download.outputs.firmware_version }}**.
+            ## 🎮 Nintendo Switch Firmware ${{ steps.download.outputs.firmware_version }}
             
-            ---
+            Ce firmware a été automatiquement détecté et téléchargé depuis les serveurs officiels de Nintendo.
             
-            **Downloaded file details:**
-            
-            ${{ steps.prepare_body.outputs.release_body }}
-            
+            **Détails du téléchargement :**
+            ```text
+            $(cat changelog_body.txt)
+            ```
           files: |
-            Firmware ${{ steps.download.outputs.firmware_version }}.zip
+            Firmware_${{ steps.download.outputs.firmware_version }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
