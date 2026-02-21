@@ -1,4 +1,4 @@
-name: 🎮 Firmware Auto Downloader (21.0.0+)
+name: 🎮 Firmware Auto Downloader
 
 on:
   schedule:
@@ -21,86 +21,123 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      
+
       - name: ⚙️ Install required Python modules
         run: |
-          pip install requests anynet beautifulsoup4 pycryptodome
+          pip install requests anynet beautifulsoup4
 
       - name: ⬇️ Setup hactool-linux
         run: |
-          if [ -f "hactool-linux" ]; then
-            cp hactool-linux hactool
-          else
-            echo "ERREUR: hactool-linux absent du dépôt"
-            exit 1
-          fi
+          cp hactool-linux hactool
           chmod +x hactool
-          
-      - name: 🔍 Check firmware version (Filter: 21.0.0+)
+
+      - name: 🔍 Check firmware version (Switch 1 only, >=21.0.0 strict)
         id: version_check
-        shell: bash
         run: |
-          RSS_FEED=$(curl -s https://yls8.mtheall.com/ninupdates/feed.php)
+          RSS=$(curl -s 'https://yls8.mtheall.com/ninupdates/feed.php')
 
-          # Extraction simple sans grep -P
-          LATEST_VERSION=$(echo "$RSS_FEED" \
-            | grep "<title>Switch" \
-            | sed -E 's/.*Switch ([0-9.]+).*/\1/' \
-            | grep -E '^(2[1-9]|[3-9][0-9])\.' \
-            | head -n 1)
+          # Extraire le premier <item> Switch (pas Switch 2)
+          ITEM=$(echo "$RSS" | awk '
+            /<item>/,/<\/item>/ {
+              if ($0 ~ /<title>Switch / && $0 !~ /Switch 2 /) print
+            }')
 
-          if [ -z "$LATEST_VERSION" ]; then
-            echo "INFO: Aucune nouvelle version majeure (>= 21.0.0) détectée."
-            echo "new_version=false" >> "$GITHUB_OUTPUT"
+          DESCRIPTION=$(echo "$ITEM" | grep -oP '<description>\K[^<]+')
+
+          if [ -z "$DESCRIPTION" ]; then
+            echo "INFO: Aucun firmware Switch valide trouvé."
+            echo "new_version=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$LATEST_VERSION")
+          echo "Description détectée : $DESCRIPTION"
 
-          if [ "$HTTP_STATUS" = "200" ]; then
-            echo "new_version=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "new_version=true" >> "$GITHUB_OUTPUT"
-            echo "latest_v=$LATEST_VERSION" >> "$GITHUB_OUTPUT"
+          # Extraire version
+          VERSION=$(echo "$DESCRIPTION" | grep -oP '^Switch \K[0-9]+\.[0-9]+\.[0-9]+')
+
+          if [ -z "$VERSION" ]; then
+            echo "INFO: Impossible d'extraire la version."
+            echo "new_version=false" >> $GITHUB_OUTPUT
+            exit 0
           fi
 
-      - name: 💻 Execute download script
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+
+          # 🔒 Bloque tout < 21
+          if [ "$MAJOR" -lt 21 ]; then
+            echo "INFO: Firmware $VERSION ignoré (<21.x)."
+            echo "new_version=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Version valide détectée : $VERSION"
+
+          # Vérifier si la release existe déjà
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$VERSION")
+
+          if [ "$HTTP_STATUS" == "200" ]; then
+            echo "INFO: La release $VERSION existe déjà."
+            echo "new_version=false" >> $GITHUB_OUTPUT
+          else
+            echo "INFO: Nouvelle version $VERSION détectée !"
+            echo "new_version=true" >> $GITHUB_OUTPUT
+            echo "firmware_version=$VERSION" >> $GITHUB_OUTPUT
+          fi
+        shell: bash
+
+      - name: 💻 Execute download script and capture changelog
         id: download
         if: steps.version_check.outputs.new_version == 'true'
         run: |
-          python3 firmware_downloader.py "${{ steps.version_check.outputs.latest_v }}" | tee firmware_output.txt
-          FIRMWARE_VERSION=$(grep 'Firmware_' firmware_output.txt | head -n1 | sed 's/.*Firmware_//')
+          python3 firmware_downloader.py | tee firmware_output.txt
+          FIRMWARE_VERSION=$(grep 'Folder: Firmware ' firmware_output.txt | awk '{print $NF}')
+          echo "firmware_version=$FIRMWARE_VERSION" >> $GITHUB_OUTPUT
+          tail -n 4 firmware_output.txt > changelog_body.txt
 
-          if [ -z "$FIRMWARE_VERSION" ]; then
-            FIRMWARE_VERSION="${{ steps.version_check.outputs.latest_v }}"
-          fi
-
-          echo "firmware_version=$FIRMWARE_VERSION" >> "$GITHUB_OUTPUT"
-          
-          echo "## 🎮 Nintendo Switch Firmware $FIRMWARE_VERSION" > release_notes.md
-          echo "Téléchargé automatiquement." >> release_notes.md
-          echo "### Détails :" >> release_notes.md
-          echo '```text' >> release_notes.md
-          tail -n 15 firmware_output.txt >> release_notes.md
-          echo '```' >> release_notes.md
-
-      - name: 🧹 Zip Firmware
+      - name: 🧹 Clean and zip firmware
         if: steps.version_check.outputs.new_version == 'true'
         run: |
           VERSION="${{ steps.download.outputs.firmware_version }}"
-          DIR_NAME=$(ls -d Firmware*${VERSION}* | head -n 1)
-          zip -rj "Firmware_$VERSION.zip" "$DIR_NAME/"
 
-      - name: 📦 Create Release on GitHub
+          # Supprimer fichiers temporaires .nca.*
+          find . -type f -name "*.nca.*" -delete
+
+          if [ -d "Firmware $VERSION" ]; then
+            rm -f "Firmware $VERSION.zip"
+            zip -rj "Firmware $VERSION.zip" "Firmware $VERSION/" -i "*.nca"
+          fi
+
+      - name: 📝 Prepare Release Body
+        id: prepare_body
+        if: steps.version_check.outputs.new_version == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            if (fs.existsSync('changelog_body.txt')) {
+              const changelogBody = fs.readFileSync('changelog_body.txt', 'utf8');
+              core.setOutput('release_body', changelogBody);
+            } else {
+              core.setOutput('release_body', 'No changelog available.');
+            }
+
+      - name: 📦 Create Tag and Release
         if: steps.version_check.outputs.new_version == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.download.outputs.firmware_version }}
           name: Firmware ${{ steps.download.outputs.firmware_version }}
-          body_path: release_notes.md
+          body: |
+            Automatic download of the official Nintendo Switch firmware version **${{ steps.download.outputs.firmware_version }}**.
+            
+            ---
+            
+            **Downloaded file details:**
+            
+            ${{ steps.prepare_body.outputs.release_body }}
           files: |
-            Firmware_${{ steps.download.outputs.firmware_version }}.zip
+            Firmware ${{ steps.download.outputs.firmware_version }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
