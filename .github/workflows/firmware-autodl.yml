@@ -38,17 +38,20 @@ jobs:
           
       - name: 🔍 Check firmware version (Filter: 21.0.0+)
         id: version_check
+        shell: bash
         run: |
-          RSS_FEED=$(curl -s 'https://yls8.mtheall.com/ninupdates/feed.php')
-          
-          LATEST_VERSION=$(echo "$RSS_FEED" | \
-            grep -oP '<title>Switch \K[0-9.]+' | \
-            grep -E '^([2-9][1-9]|[3-9][0-9])\.' | \
-            head -n 1)
+          RSS_FEED=$(curl -s https://yls8.mtheall.com/ninupdates/feed.php)
+
+          # Extraction simple sans grep -P
+          LATEST_VERSION=$(echo "$RSS_FEED" \
+            | grep "<title>Switch" \
+            | sed -E 's/.*Switch ([0-9.]+).*/\1/' \
+            | grep -E '^(2[1-9]|[3-9][0-9])\.' \
+            | head -n 1)
 
           if [ -z "$LATEST_VERSION" ]; then
             echo "INFO: Aucune nouvelle version majeure (>= 21.0.0) détectée."
-            echo "new_version=false" >> $GITHUB_OUTPUT
+            echo "new_version=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -56,25 +59,28 @@ jobs:
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/$LATEST_VERSION")
 
-          if [ "$HTTP_STATUS" == "200" ]; then
-            echo "new_version=false" >> $GITHUB_OUTPUT
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "new_version=false" >> "$GITHUB_OUTPUT"
           else
-            echo "new_version=true" >> $GITHUB_OUTPUT
-            echo "latest_v=$LATEST_VERSION" >> $GITHUB_OUTPUT
+            echo "new_version=true" >> "$GITHUB_OUTPUT"
+            echo "latest_v=$LATEST_VERSION" >> "$GITHUB_OUTPUT"
           fi
-        shell: bash
 
       - name: 💻 Execute download script
         id: download
         if: steps.version_check.outputs.new_version == 'true'
         run: |
           python3 firmware_downloader.py "${{ steps.version_check.outputs.latest_v }}" | tee firmware_output.txt
-          FIRMWARE_VERSION=$(grep 'Folder: Firmware ' firmware_output.txt | awk '{print $NF}' || echo "${{ steps.version_check.outputs.latest_v }}")
-          echo "firmware_version=$FIRMWARE_VERSION" >> $GITHUB_OUTPUT
+          FIRMWARE_VERSION=$(grep 'Firmware_' firmware_output.txt | head -n1 | sed 's/.*Firmware_//')
+
+          if [ -z "$FIRMWARE_VERSION" ]; then
+            FIRMWARE_VERSION="${{ steps.version_check.outputs.latest_v }}"
+          fi
+
+          echo "firmware_version=$FIRMWARE_VERSION" >> "$GITHUB_OUTPUT"
           
-          # Préparation propre du corps de la release
           echo "## 🎮 Nintendo Switch Firmware $FIRMWARE_VERSION" > release_notes.md
-          echo "Téléchargé automatiquement depuis les serveurs officiels." >> release_notes.md
+          echo "Téléchargé automatiquement." >> release_notes.md
           echo "### Détails :" >> release_notes.md
           echo '```text' >> release_notes.md
           tail -n 15 firmware_output.txt >> release_notes.md
