@@ -33,16 +33,23 @@ jobs:
 
       - name: 🔍 Check firmware version (Switch 1 only, >=21.0.0 strict)
         id: version_check
+        shell: bash
         run: |
-          RSS=$(curl -s 'https://yls8.mtheall.com/ninupdates/feed.php')
+          set +e
 
-          # Extraire le premier <item> Switch (pas Switch 2)
-          ITEM=$(echo "$RSS" | awk '
-            /<item>/,/<\/item>/ {
-              if ($0 ~ /<title>Switch / && $0 !~ /Switch 2 /) print
-            }')
+          RSS=$(curl -sL --fail https://yls8.mtheall.com/ninupdates/feed.php)
+          CURL_STATUS=$?
 
-          DESCRIPTION=$(echo "$ITEM" | grep -oP '<description>\K[^<]+')
+          if [ $CURL_STATUS -ne 0 ] || [ -z "$RSS" ]; then
+            echo "INFO: Impossible de récupérer le RSS."
+            echo "new_version=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Extraire description Switch (ignore Switch 2)
+          DESCRIPTION=$(echo "$RSS" | grep -oE '<description>Switch [0-9]+\.[0-9]+\.[0-9]+' | \
+                        grep -v 'Switch 2' | \
+                        head -n 1)
 
           if [ -z "$DESCRIPTION" ]; then
             echo "INFO: Aucun firmware Switch valide trouvé."
@@ -52,8 +59,7 @@ jobs:
 
           echo "Description détectée : $DESCRIPTION"
 
-          # Extraire version
-          VERSION=$(echo "$DESCRIPTION" | grep -oP '^Switch \K[0-9]+\.[0-9]+\.[0-9]+')
+          VERSION=$(echo "$DESCRIPTION" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
 
           if [ -z "$VERSION" ]; then
             echo "INFO: Impossible d'extraire la version."
@@ -63,7 +69,7 @@ jobs:
 
           MAJOR=$(echo "$VERSION" | cut -d. -f1)
 
-          # 🔒 Bloque tout < 21
+          # Autorise uniquement 21+
           if [ "$MAJOR" -lt 21 ]; then
             echo "INFO: Firmware $VERSION ignoré (<21.x)."
             echo "new_version=false" >> $GITHUB_OUTPUT
@@ -72,12 +78,11 @@ jobs:
 
           echo "Version valide détectée : $VERSION"
 
-          # Vérifier si la release existe déjà
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/$VERSION")
 
-          if [ "$HTTP_STATUS" == "200" ]; then
+          if [ "$HTTP_STATUS" = "200" ]; then
             echo "INFO: La release $VERSION existe déjà."
             echo "new_version=false" >> $GITHUB_OUTPUT
           else
@@ -85,7 +90,8 @@ jobs:
             echo "new_version=true" >> $GITHUB_OUTPUT
             echo "firmware_version=$VERSION" >> $GITHUB_OUTPUT
           fi
-        shell: bash
+
+          set -e
 
       - name: 💻 Execute download script and capture changelog
         id: download
@@ -101,7 +107,6 @@ jobs:
         run: |
           VERSION="${{ steps.download.outputs.firmware_version }}"
 
-          # Supprimer fichiers temporaires .nca.*
           find . -type f -name "*.nca.*" -delete
 
           if [ -d "Firmware $VERSION" ]; then
