@@ -2,8 +2,8 @@ name: 🎮 Firmware Auto Downloader (21.0.0+)
 
 on:
   schedule:
-    - cron: '0 * * * *' # Vérifie toutes les heures
-  workflow_dispatch: # Permet de lancer manuellement depuis l'onglet Actions
+    - cron: '0 * * * *'
+  workflow_dispatch:
 
 jobs:
   download_and_release:
@@ -39,11 +39,8 @@ jobs:
       - name: 🔍 Check firmware version (Filter: 21.0.0+)
         id: version_check
         run: |
-          # 1. Récupérer le flux RSS de NinUpdates
           RSS_FEED=$(curl -s 'https://yls8.mtheall.com/ninupdates/feed.php')
           
-          # 2. Extraire la version en ignorant explicitement 19.x et 20.x
-          # La regex '^([2-9][1-9]|[3-9][0-9])' impose un nombre >= 21
           LATEST_VERSION=$(echo "$RSS_FEED" | \
             grep -oP '<title>Switch \K[0-9.]+' | \
             grep -E '^([2-9][1-9]|[3-9][0-9])\.' | \
@@ -55,18 +52,13 @@ jobs:
             exit 0
           fi
 
-          echo "Version majeure détectée : $LATEST_VERSION"
-
-          # 3. Vérifier si cette version a déjà été publiée dans tes Releases
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/$LATEST_VERSION")
 
           if [ "$HTTP_STATUS" == "200" ]; then
-            echo "INFO: La release $LATEST_VERSION existe déjà."
             echo "new_version=false" >> $GITHUB_OUTPUT
           else
-            echo "INFO: NOUVELLE VERSION $LATEST_VERSION DETECTEE !"
             echo "new_version=true" >> $GITHUB_OUTPUT
             echo "latest_v=$LATEST_VERSION" >> $GITHUB_OUTPUT
           fi
@@ -76,29 +68,24 @@ jobs:
         id: download
         if: steps.version_check.outputs.new_version == 'true'
         run: |
-          # On lance le script avec la version détectée
           python3 firmware_downloader.py "${{ steps.version_check.outputs.latest_v }}" | tee firmware_output.txt
-          
-          # On récupère le nom exact du dossier créé
           FIRMWARE_VERSION=$(grep 'Folder: Firmware ' firmware_output.txt | awk '{print $NF}' || echo "${{ steps.version_check.outputs.latest_v }}")
           echo "firmware_version=$FIRMWARE_VERSION" >> $GITHUB_OUTPUT
           
-          # Extraction d'un mini log pour la description de la release
-          tail -n 15 firmware_output.txt > changelog_body.txt
+          # Préparation propre du corps de la release
+          echo "## 🎮 Nintendo Switch Firmware $FIRMWARE_VERSION" > release_notes.md
+          echo "Téléchargé automatiquement depuis les serveurs officiels." >> release_notes.md
+          echo "### Détails :" >> release_notes.md
+          echo '```text' >> release_notes.md
+          tail -n 15 firmware_output.txt >> release_notes.md
+          echo '```' >> release_notes.md
 
       - name: 🧹 Zip Firmware
         if: steps.version_check.outputs.new_version == 'true'
         run: |
           VERSION="${{ steps.download.outputs.firmware_version }}"
-          # Trouve le dossier (ex: "Firmware 21.0.0")
           DIR_NAME=$(ls -d Firmware*${VERSION}* | head -n 1)
-          
-          if [ -d "$DIR_NAME" ]; then
-            zip -rj "Firmware_$VERSION.zip" "$DIR_NAME/"
-          else
-            echo "ERREUR: Dossier $DIR_NAME introuvable après téléchargement"
-            exit 1
-          fi
+          zip -rj "Firmware_$VERSION.zip" "$DIR_NAME/"
 
       - name: 📦 Create Release on GitHub
         if: steps.version_check.outputs.new_version == 'true'
@@ -106,15 +93,7 @@ jobs:
         with:
           tag_name: ${{ steps.download.outputs.firmware_version }}
           name: Firmware ${{ steps.download.outputs.firmware_version }}
-          body: |
-            ## 🎮 Nintendo Switch Firmware ${{ steps.download.outputs.firmware_version }}
-            
-            Ce firmware a été automatiquement détecté et téléchargé depuis les serveurs officiels de Nintendo.
-            
-            **Détails du téléchargement :**
-            ```text
-            $(cat changelog_body.txt)
-            ```
+          body_path: release_notes.md
           files: |
             Firmware_${{ steps.download.outputs.firmware_version }}.zip
         env:
