@@ -23,7 +23,7 @@ jobs:
       - name: ⚙️ Install required Python modules
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 packaging
+          pip install requests beautifulsoup4 packaging lxml
 
       - name: ⬇️ Setup hactool-linux
         run: |
