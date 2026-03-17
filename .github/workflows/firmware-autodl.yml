@@ -35,105 +35,82 @@ jobs:
             echo "Warning: hactool-linux non trouvé."
           fi
 
-      - name: 🔍 Check firmware version (Switch 1 only, >=21.0.0 strict)
+      - name: 🔍 Check firmware version (Switch 1 only, >=21.0.0)
         id: version_check
         shell: bash
         run: |
           set +e
-
-          # Récupération du flux RSS
           RSS=$(curl -sL --fail https://yls8.mtheall.com/ninupdates/feed.php)
           if [ $? -ne 0 ] || [ -z "$RSS" ]; then
-            echo "ERROR: Impossible de récupérer le flux RSS."
             echo "new_version=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          # LOGIQUE DE DÉTECTION ROBUSTE :
-          # 1. On extrait les blocs <item> pour ne pas mélanger les données
-          # 2. On filtre uniquement ceux qui contiennent 'sys=hac' (Switch 1)
-          # 3. On extrait le numéro de version X.X.X
-          # 4. On trie par version (sort -V) et on prend la plus haute
-          
+          # Extraction stricte Switch 1 (hac) + Tri version
           LATEST_VERSION=$(echo "$RSS" | tr -d '\n' | sed 's/<item>/\n<item>/g' | \
-            grep 'sys=hac' | \
-            grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | \
-            sort -V | tail -n 1)
+            grep 'sys=hac' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -n 1)
 
           if [ -z "$LATEST_VERSION" ]; then
-            echo "INFO: Aucun firmware Switch 1 trouvé."
             echo "new_version=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          echo "Dernière version Switch 1 détectée : $LATEST_VERSION"
-
-          # Vérification du seuil (>= 21)
           MAJOR=$(echo "$LATEST_VERSION" | cut -d. -f1)
           if [ "$MAJOR" -lt 21 ]; then
-            echo "INFO: Version $LATEST_VERSION ignorée (seuil < 21)."
             echo "new_version=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          # Vérification si la release existe déjà
+          # Check si la Release existe
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/$LATEST_VERSION")
 
           if [ "$HTTP_STATUS" = "200" ]; then
-            echo "INFO: La release $LATEST_VERSION existe déjà."
             echo "new_version=false" >> $GITHUB_OUTPUT
           else
-            echo "ACTION: Nouvelle version $LATEST_VERSION détectée !"
             echo "new_version=true" >> $GITHUB_OUTPUT
             echo "firmware_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
           fi
           set -e
 
-      - name: 💻 Execute download script and capture changelog
+      - name: 💻 Execute download script
         id: download
         if: steps.version_check.outputs.new_version == 'true'
         run: |
-          python3 firmware_downloader.py | tee firmware_output.txt
-          
-          # Extraction de la version confirmée par le script (nettoyage des retours chariot)
-          F_VER=$(grep 'Folder: Firmware ' firmware_output.txt | awk '{print $NF}' | tr -d '\r')
-          
-          if [ -z "$F_VER" ]; then
-            F_VER="${{ steps.version_check.outputs.firmware_version }}"
-          fi
-          
-          echo "firmware_version=$F_VER" >> $GITHUB_OUTPUT
-          tail -n 10 firmware_output.txt > changelog_body.txt
+          python3 firmware_downloader.py
+          VERSION="${{ steps.version_check.outputs.firmware_version }}"
+          echo "firmware_version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: 🧹 Clean and zip firmware
+      - name: 🧹 Clean and Generate Changelog
+        id: cleanup
         if: steps.version_check.outputs.new_version == 'true'
         run: |
           VERSION="${{ steps.download.outputs.firmware_version }}"
-          find . -type f -name "*.nca.*" -delete
+          DIR="Firmware $VERSION"
+          
+          if [ -d "$DIR" ]; then
+            # Suppression des fichiers .1.nca et fragments
+            find "$DIR" -type f -name "*.[0-9].nca" -delete
+            find "$DIR" -type f -name "*.nca.*" -delete
 
-          if [ -d "Firmware $VERSION" ]; then
-            rm -f "Firmware $VERSION.zip"
-            zip -rj "Firmware $VERSION.zip" "Firmware $VERSION/" -i "*.nca"
+            # Extraction des SystemVersion NCA (fichiers de ~128KB)
+            # On cherche les fichiers NCA et on les trie par taille pour identifier les SystemVersion
+            SV_FAT=$(ls -S "$DIR"/*.nca | tail -n 2 | head -n 1 | xargs basename)
+            SV_EXFAT=$(ls -S "$DIR"/*.nca | tail -n 1 | xargs basename)
+
+            # Création du changelog personnalisé
+            echo "Archive created: Firmware $VERSION.zip" > changelog_body.txt
+            echo "SystemVersion NCA FAT: $SV_FAT" >> changelog_body.txt
+            echo "SystemVersion NCA exFAT: $SV_EXFAT" >> changelog_body.txt
+            echo "Verify hashes before installation!" >> changelog_body.txt
+
+            # Compression
+            zip -rj "Firmware $VERSION.zip" "$DIR/" -i "*.nca"
           else
-            echo "ERROR: Dossier Firmware $VERSION introuvable."
+            echo "Dossier non trouvé"
             exit 1
           fi
-
-      - name: 📝 Prepare Release Body
-        id: prepare_body
-        if: steps.version_check.outputs.new_version == 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            let body = "Automatic download of official Nintendo Switch firmware.";
-            if (fs.existsSync('changelog_body.txt')) {
-              const changelog = fs.readFileSync('changelog_body.txt', 'utf8');
-              body += "\n\n**Changelog / Output:**\n```\n" + changelog + "\n```";
-            }
-            core.setOutput('release_body', body);
 
       - name: 📦 Create Tag and Release
         if: steps.version_check.outputs.new_version == 'true'
@@ -141,7 +118,13 @@ jobs:
         with:
           tag_name: ${{ steps.download.outputs.firmware_version }}
           name: Firmware ${{ steps.download.outputs.firmware_version }}
-          body: ${{ steps.prepare_body.outputs.release_body }}
+          body: |
+            Automatic download of the official Nintendo Switch firmware version **${{ steps.download.outputs.firmware_version }}**.
+            
+            **Downloaded file details:**
+            ```text
+            $(cat changelog_body.txt)
+            ```
           files: |
             Firmware ${{ steps.download.outputs.firmware_version }}.zip
         env:
