@@ -28,12 +28,11 @@ jobs:
 
       - name: ⬇️ Setup hactool-linux
         run: |
-          # Vérifie si le fichier existe avant de tenter de le copier
           if [ -f "hactool-linux" ]; then
             cp hactool-linux hactool
             chmod +x hactool
           else
-            echo "Warning: hactool-linux non trouvé dans le dépôt."
+            echo "Warning: hactool-linux non trouvé."
           fi
 
       - name: 🔍 Check firmware version (Switch 1 only, >=21.0.0 strict)
@@ -50,83 +49,75 @@ jobs:
             exit 0
           fi
 
-          # Extraction et tri : 
-          # 1. On cherche les balises Switch (ignore Switch 2)
-          # 2. On extrait uniquement les numéros de version
-          # 3. On trie par ordre de version (sort -V) pour mettre la plus haute en dernier
-          VERSIONS=$(echo "$RSS" | grep -oE '<description>Switch [0-9]+\.[0-9]+\.[0-9]+' | \
-                        grep -v 'Switch 2' | \
-                        grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | \
-                        sort -V)
-
-          # On récupère la version la plus élevée de la liste
-          LATEST_VERSION=$(echo "$VERSIONS" | tail -n 1)
+          # LOGIQUE DE DÉTECTION ROBUSTE :
+          # 1. On extrait les blocs <item> pour ne pas mélanger les données
+          # 2. On filtre uniquement ceux qui contiennent 'sys=hac' (Switch 1)
+          # 3. On extrait le numéro de version X.X.X
+          # 4. On trie par version (sort -V) et on prend la plus haute
+          
+          LATEST_VERSION=$(echo "$RSS" | tr -d '\n' | sed 's/<item>/\n<item>/g' | \
+            grep 'sys=hac' | \
+            grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | \
+            sort -V | tail -n 1)
 
           if [ -z "$LATEST_VERSION" ]; then
-            echo "INFO: Aucun firmware valide trouvé."
+            echo "INFO: Aucun firmware Switch 1 trouvé."
             echo "new_version=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          echo "Dernière version trouvée sur NinUpdates : $LATEST_VERSION"
+          echo "Dernière version Switch 1 détectée : $LATEST_VERSION"
 
-          # Vérification du numéro de version majeure (>= 21)
+          # Vérification du seuil (>= 21)
           MAJOR=$(echo "$LATEST_VERSION" | cut -d. -f1)
           if [ "$MAJOR" -lt 21 ]; then
-            echo "INFO: Firmware $LATEST_VERSION ignoré (inférieur à 21.0.0)."
+            echo "INFO: Version $LATEST_VERSION ignorée (seuil < 21)."
             echo "new_version=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          # Vérification si la Release existe déjà sur votre GitHub
+          # Vérification si la release existe déjà
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/$LATEST_VERSION")
 
           if [ "$HTTP_STATUS" = "200" ]; then
-            echo "INFO: La version $LATEST_VERSION a déjà été publiée."
+            echo "INFO: La release $LATEST_VERSION existe déjà."
             echo "new_version=false" >> $GITHUB_OUTPUT
           else
             echo "ACTION: Nouvelle version $LATEST_VERSION détectée !"
             echo "new_version=true" >> $GITHUB_OUTPUT
             echo "firmware_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
           fi
-
           set -e
 
       - name: 💻 Execute download script and capture changelog
         id: download
         if: steps.version_check.outputs.new_version == 'true'
         run: |
-          # On lance le script Python et on enregistre la sortie
           python3 firmware_downloader.py | tee firmware_output.txt
           
-          # On tente d'extraire la version confirmée par le script Python
-          FIRMWARE_VERSION=$(grep 'Folder: Firmware ' firmware_output.txt | awk '{print $NF}' | tr -d '\r')
+          # Extraction de la version confirmée par le script (nettoyage des retours chariot)
+          F_VER=$(grep 'Folder: Firmware ' firmware_output.txt | awk '{print $NF}' | tr -d '\r')
           
-          # Si le script Python n'a pas renvoyé de dossier, on utilise la version du RSS
-          if [ -z "$FIRMWARE_VERSION" ]; then
-            FIRMWARE_VERSION="${{ steps.version_check.outputs.firmware_version }}"
+          if [ -z "$F_VER" ]; then
+            F_VER="${{ steps.version_check.outputs.firmware_version }}"
           fi
           
-          echo "firmware_version=$FIRMWARE_VERSION" >> $GITHUB_OUTPUT
-          # Capture les dernières lignes pour le changelog de la release
+          echo "firmware_version=$F_VER" >> $GITHUB_OUTPUT
           tail -n 10 firmware_output.txt > changelog_body.txt
 
       - name: 🧹 Clean and zip firmware
         if: steps.version_check.outputs.new_version == 'true'
         run: |
           VERSION="${{ steps.download.outputs.firmware_version }}"
-          
-          # Nettoyage des fichiers temporaires .nca split
           find . -type f -name "*.nca.*" -delete
 
-          # Création de l'archive ZIP si le dossier existe
           if [ -d "Firmware $VERSION" ]; then
             rm -f "Firmware $VERSION.zip"
             zip -rj "Firmware $VERSION.zip" "Firmware $VERSION/" -i "*.nca"
           else
-            echo "ERROR: Le dossier 'Firmware $VERSION' est introuvable."
+            echo "ERROR: Dossier Firmware $VERSION introuvable."
             exit 1
           fi
 
@@ -137,10 +128,10 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            let body = "Automatic download of the official Nintendo Switch firmware.";
+            let body = "Automatic download of official Nintendo Switch firmware.";
             if (fs.existsSync('changelog_body.txt')) {
               const changelog = fs.readFileSync('changelog_body.txt', 'utf8');
-              body += "\n\n**Details:**\n```\n" + changelog + "\n```";
+              body += "\n\n**Changelog / Output:**\n```\n" + changelog + "\n```";
             }
             core.setOutput('release_body', body);
 
