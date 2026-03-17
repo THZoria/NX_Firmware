@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: ⬇️ Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: 🐍 Setup Python
         uses: actions/setup-python@v5
@@ -22,94 +24,109 @@ jobs:
 
       - name: ⚙️ Install required Python modules
         run: |
-          python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 packaging lxml
+          pip install requests anynet beautifulsoup4
 
       - name: ⬇️ Setup hactool-linux
         run: |
+          # Vérifie si le fichier existe avant de tenter de le copier
           if [ -f "hactool-linux" ]; then
             cp hactool-linux hactool
             chmod +x hactool
+          else
+            echo "Warning: hactool-linux non trouvé dans le dépôt."
           fi
 
-      - name: 🔍 Check firmware version
+      - name: 🔍 Check firmware version (Switch 1 only, >=21.0.0 strict)
         id: version_check
+        shell: bash
         run: |
-          python3 << 'EOF'
-          import requests
-          import sys
-          import os
-          from bs4 import BeautifulSoup
-          from packaging import version
+          set +e
 
-          URL = "https://yls8.mtheall.com/ninupdates/feed.php"
-          output_file = os.getenv('GITHUB_OUTPUT')
+          # Récupération du flux RSS
+          RSS=$(curl -sL --fail https://yls8.mtheall.com/ninupdates/feed.php)
+          if [ $? -ne 0 ] || [ -z "$RSS" ]; then
+            echo "ERROR: Impossible de récupérer le flux RSS."
+            echo "new_version=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
 
-          try:
-              r = requests.get(URL, timeout=10)
-              r.raise_for_status()
-          except:
-              open(output_file, "a").write("new_version=false\n")
-              sys.exit(0)
+          # Extraction et tri : 
+          # 1. On cherche les balises Switch (ignore Switch 2)
+          # 2. On extrait uniquement les numéros de version
+          # 3. On trie par ordre de version (sort -V) pour mettre la plus haute en dernier
+          VERSIONS=$(echo "$RSS" | grep -oE '<description>Switch [0-9]+\.[0-9]+\.[0-9]+' | \
+                        grep -v 'Switch 2' | \
+                        grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | \
+                        sort -V)
 
-          soup = BeautifulSoup(r.text, "xml")
-          items = soup.find_all("item")
+          # On récupère la version la plus élevée de la liste
+          LATEST_VERSION=$(echo "$VERSIONS" | tail -n 1)
 
-          versions = []
-          for item in items:
-              link = item.find("link").text if item.find("link") else ""
-              title = item.find("title").text if item.find("title") else ""
+          if [ -z "$LATEST_VERSION" ]; then
+            echo "INFO: Aucun firmware valide trouvé."
+            echo "new_version=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
 
-              if "sys=hac" in link and title.startswith("Switch "):
-                  versions.append(title.replace("Switch ", "").strip())
+          echo "Dernière version trouvée sur NinUpdates : $LATEST_VERSION"
 
-          if not versions:
-              open(output_file, "a").write("new_version=false\n")
-              sys.exit(0)
+          # Vérification du numéro de version majeure (>= 21)
+          MAJOR=$(echo "$LATEST_VERSION" | cut -d. -f1)
+          if [ "$MAJOR" -lt 21 ]; then
+            echo "INFO: Firmware $LATEST_VERSION ignoré (inférieur à 21.0.0)."
+            echo "new_version=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
 
-          latest = sorted(set(versions), key=version.parse)[-1]
+          # Vérification si la Release existe déjà sur votre GitHub
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$LATEST_VERSION")
 
-          if version.parse(latest) < version.parse("21.0.0"):
-              open(output_file, "a").write("new_version=false\n")
-              sys.exit(0)
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "INFO: La version $LATEST_VERSION a déjà été publiée."
+            echo "new_version=false" >> $GITHUB_OUTPUT
+          else
+            echo "ACTION: Nouvelle version $LATEST_VERSION détectée !"
+            echo "new_version=true" >> $GITHUB_OUTPUT
+            echo "firmware_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          fi
 
-          repo = os.environ["GITHUB_REPOSITORY"]
-          token = os.environ["GITHUB_TOKEN"]
+          set -e
 
-          api = f"https://api.github.com/repos/{repo}/releases/tags/{latest}"
-          res = requests.get(api, headers={"Authorization": f"token {token}"})
-
-          if res.status_code == 200:
-              open(output_file, "a").write("new_version=false\n")
-          else:
-              open(output_file, "a").write("new_version=true\n")
-              open(output_file, "a").write(f"firmware_version={latest}\n")
-          EOF
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 💻 Execute download script
+      - name: 💻 Execute download script and capture changelog
         id: download
         if: steps.version_check.outputs.new_version == 'true'
         run: |
+          # On lance le script Python et on enregistre la sortie
           python3 firmware_downloader.py | tee firmware_output.txt
-          VERSION="${{ steps.version_check.outputs.firmware_version }}"
-          echo "firmware_version=$VERSION" >> $GITHUB_OUTPUT
+          
+          # On tente d'extraire la version confirmée par le script Python
+          FIRMWARE_VERSION=$(grep 'Folder: Firmware ' firmware_output.txt | awk '{print $NF}' | tr -d '\r')
+          
+          # Si le script Python n'a pas renvoyé de dossier, on utilise la version du RSS
+          if [ -z "$FIRMWARE_VERSION" ]; then
+            FIRMWARE_VERSION="${{ steps.version_check.outputs.firmware_version }}"
+          fi
+          
+          echo "firmware_version=$FIRMWARE_VERSION" >> $GITHUB_OUTPUT
+          # Capture les dernières lignes pour le changelog de la release
           tail -n 10 firmware_output.txt > changelog_body.txt
 
       - name: 🧹 Clean and zip firmware
         if: steps.version_check.outputs.new_version == 'true'
         run: |
           VERSION="${{ steps.download.outputs.firmware_version }}"
-
+          
+          # Nettoyage des fichiers temporaires .nca split
           find . -type f -name "*.nca.*" -delete
 
+          # Création de l'archive ZIP si le dossier existe
           if [ -d "Firmware $VERSION" ]; then
-            zip -rj "Firmware_$VERSION.zip" "Firmware $VERSION/" -i "*.nca"
-          elif [ -d "Firmware_$VERSION" ]; then
-            zip -rj "Firmware_$VERSION.zip" "Firmware_$VERSION/" -i "*.nca"
+            rm -f "Firmware $VERSION.zip"
+            zip -rj "Firmware $VERSION.zip" "Firmware $VERSION/" -i "*.nca"
           else
-            echo "ERROR: Aucun dossier firmware trouvé"
+            echo "ERROR: Le dossier 'Firmware $VERSION' est introuvable."
             exit 1
           fi
 
@@ -120,11 +137,12 @@ jobs:
         with:
           script: |
             const fs = require('fs');
+            let body = "Automatic download of the official Nintendo Switch firmware.";
             if (fs.existsSync('changelog_body.txt')) {
-              core.setOutput('body', fs.readFileSync('changelog_body.txt', 'utf8'));
-            } else {
-              core.setOutput('body', 'No changelog available.');
+              const changelog = fs.readFileSync('changelog_body.txt', 'utf8');
+              body += "\n\n**Details:**\n```\n" + changelog + "\n```";
             }
+            core.setOutput('release_body', body);
 
       - name: 📦 Create Tag and Release
         if: steps.version_check.outputs.new_version == 'true'
@@ -132,15 +150,8 @@ jobs:
         with:
           tag_name: ${{ steps.download.outputs.firmware_version }}
           name: Firmware ${{ steps.download.outputs.firmware_version }}
-          body: |
-            Automatic download of the official Nintendo Switch firmware version **${{ steps.download.outputs.firmware_version }}**.
-
-            ---
-            
-            **Détails :**
-            
-            ${{ steps.prepare_body.outputs.body }}
+          body: ${{ steps.prepare_body.outputs.release_body }}
           files: |
-            Firmware_${{ steps.download.outputs.firmware_version }}.zip
+            Firmware ${{ steps.download.outputs.firmware_version }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
