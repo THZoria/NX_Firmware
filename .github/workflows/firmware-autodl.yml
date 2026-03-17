@@ -46,38 +46,32 @@ jobs:
             exit 0
           fi
 
-          # Extraire description Switch (ignore Switch 2)
-          DESCRIPTION=$(echo "$RSS" | grep -oE '<description>Switch [0-9]+\.[0-9]+\.[0-9]+' | \
-                        grep -v 'Switch 2' | \
-                        head -n 1)
+          # 🔥 Extraction propre de toutes les versions Switch (ignore Switch 2)
+          VERSIONS=$(echo "$RSS" | grep -oE 'Switch [0-9]+\.[0-9]+\.[0-9]+' | \
+                     grep -v 'Switch 2' | \
+                     grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
 
-          if [ -z "$DESCRIPTION" ]; then
-            echo "INFO: Aucun firmware Switch valide trouvé."
+          if [ -z "$VERSIONS" ]; then
+            echo "INFO: Aucun firmware trouvé."
             echo "new_version=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          echo "Description détectée : $DESCRIPTION"
+          # 🔥 Prend la version la plus récente (corrige ton bug)
+          VERSION=$(printf "%s\n" $VERSIONS | sort -V | tail -n 1)
 
-          VERSION=$(echo "$DESCRIPTION" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
-
-          if [ -z "$VERSION" ]; then
-            echo "INFO: Impossible d'extraire la version."
-            echo "new_version=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
+          echo "Version la plus récente détectée : $VERSION"
 
           MAJOR=$(echo "$VERSION" | cut -d. -f1)
 
-          # Autorise uniquement 21+
+          # 🔒 Ignore < 21.x
           if [ "$MAJOR" -lt 21 ]; then
             echo "INFO: Firmware $VERSION ignoré (<21.x)."
             echo "new_version=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          echo "Version valide détectée : $VERSION"
-
+          # 🔎 Vérifie si release déjà existante
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/$VERSION")
