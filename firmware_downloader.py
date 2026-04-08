@@ -181,7 +181,7 @@ def dltitle(title_id, version, is_su=False):
     except HTTPError as e:
         if e.response is not None and e.response.status_code == 404:
             print(f"INFO: Title {title_id} version {version} not found (404).")
-            if title_id == "010000000000081B":
+            if title_id.lower() == "010000000000081b":
                 sv_nca_exfat = ""
             return
         raise
@@ -201,9 +201,9 @@ def dltitle(title_id, version, is_su=False):
             dltitle(t_id, ver)
     else:
         for nca_id, nca_hash in parse_cnmt(cnmt_nca):
-            if title_id == "0100000000000809":
+            if title_id.lower() == "0100000000000809":
                 sv_nca_fat = f"{nca_id}.nca"
-            elif title_id == "010000000000081B":
+            elif title_id.lower() == "010000000000081b":
                 sv_nca_exfat = f"{nca_id}.nca"
 
             if nca_id not in queued_ncas:
@@ -296,8 +296,8 @@ if __name__ == "__main__":
     dlfiles(update_dls)
 
     if not sv_nca_exfat:
-        print("INFO: exFAT not found via meta — direct attempt 010000000000081B…")
-        dltitle("010000000000081B", ver_raw, is_su=False)
+        print("INFO: exFAT not found via meta — direct attempt 010000000000081b…")
+        dltitle("010000000000081b", ver_raw, is_su=False)
         if sv_nca_exfat:
             dlfiles(update_dls)
         else:
