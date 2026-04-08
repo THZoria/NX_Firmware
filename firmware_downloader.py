@@ -13,7 +13,7 @@ from os import makedirs, remove
 from os.path import basename, exists, join
 from configparser import ConfigParser
 from sys import argv
-from zipfile import ZipFile, ZIP_DEFLATED 
+from zipfile import ZipFile, ZIP_STORED, ZipInfo
 
 from requests import request
 from requests.exceptions import HTTPError
@@ -121,15 +121,15 @@ def nin_request(method, url, headers=None):
 def parse_cnmt(nca):
     ncaf = basename(nca)
     
-    # --- MODIFICATION CLÉ ---
-    # Force l'utilisation de l'exécutable hactool dans le répertoire courant.
-    # Dans le workflow, hactool-linux a été renommé en hactool et rendu exécutable.
+    # --- KEY MODIFICATION ---
+    # Force the use of the hactool executable in the current directory.
+    # In the workflow, hactool-linux was renamed to hactool and made executable.
     hactool_bin = "hactool.exe" if os.name == "nt" else "./hactool" 
     # -----------------------
     
     cnmt_temp_dir = f"cnmt_tmp_{ncaf}"
     
-    # Le script tente de lancer './hactool'
+    # The script attempts to run './hactool'
     run(
         [hactool_bin, "-k", "prod.keys", nca, "--section0dir", cnmt_temp_dir],
         stdout=PIPE, stderr=PIPE
@@ -217,12 +217,22 @@ def dltitle(title_id, version, is_su=False):
                 ))
 
 def zipdir(src_dir, out_zip):
-    with ZipFile(out_zip, "w", compression=ZIP_DEFLATED) as zf:
-        for root, _, files in os.walk(src_dir):
-            for name in files:
+    with ZipFile(out_zip, "w", compression=ZIP_STORED) as zf:
+        for root, dirs, files in os.walk(src_dir):
+            dirs.sort()
+            for name in sorted(files):
                 full = os.path.join(root, name)
                 rel  = os.path.relpath(full, start=src_dir) 
-                zf.write(full, arcname=rel)
+                os.utime(full, (1780315200, 1780315200))
+                
+                zinfo = ZipInfo.from_file(full, arcname=rel)
+                zinfo.date_time = (2026, 1, 1, 0, 0, 0)
+                zinfo.create_system = 0
+                zinfo.external_attr = 0 
+                zinfo.compress_type = ZIP_STORED
+                
+                with open(full, 'rb') as f:
+                    zf.writestr(zinfo, f.read())
 
 if __name__ == "__main__":
     if not exists("certificat.pem"):
@@ -311,13 +321,48 @@ if __name__ == "__main__":
     if failed:
         exit(1)
 
+    print("\nINFO: Starting detailed verification of NCA hashes...")
+    hash_failed = False
+    for url, dirc, fname, expected_hash in update_dls:
+        fpath = join(dirc, fname)
+        if exists(fpath):
+            h = hashlib.sha256()
+            with open(fpath, "rb") as f:
+                for chunk in iter(lambda: f.read(1048576), b""):
+                    h.update(chunk)
+            actual_hash = h.hexdigest()
+            if actual_hash == expected_hash:
+                print(f"[OK] {fname}")
+                print(f"     -> Verified Hash: {actual_hash}")
+            else:
+                print(f"[ERROR] {fname}")
+                print(f"        Expected : {expected_hash}")
+                print(f"        Actual   : {actual_hash}")
+                hash_failed = True
+        else:
+            print(f"[MISSING] {fname}")
+            hash_failed = True
+
+    if hash_failed:
+        print("\nCRITICAL: Hash verification failed for one or more files. Archive will not be created.")
+        exit(1)
+    else:
+        print("\nINFO: All files successfully verified against CNMT records.")
+
     out_zip = f"{ver_dir}.zip" 
     if exists(out_zip):
         remove(out_zip)
     zipdir(ver_dir, out_zip)
 
+    h = hashlib.sha256()
+    with open(out_zip, "rb") as f:
+        for chunk in iter(lambda: f.read(1048576), b""):
+            h.update(chunk)
+    zip_sha256 = h.hexdigest()
+
     print("\nDOWNLOAD COMPLETE!")
     print(f"Archive created: {out_zip}")
     print(f"SystemVersion NCA FAT: {sv_nca_fat or 'Not Found'}")
     print(f"SystemVersion NCA exFAT: {sv_nca_exfat or 'Not Found'}")
+    print(f"Archive SHA256: {zip_sha256}")
     print("Verify hashes before installation!")
