@@ -74,43 +74,24 @@ jobs:
           fi
           set -e
 
-      - name: 💻 Execute download script
+      - name: 💻 Execute download script & Extract Release Notes
         id: download
         if: steps.version_check.outputs.new_version == 'true'
         run: |
-          python3 firmware_downloader.py
           VERSION="${{ steps.version_check.outputs.firmware_version }}"
-          echo "firmware_version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: 🧹 Clean and Generate Changelog
-        id: cleanup
-        if: steps.version_check.outputs.new_version == 'true'
-        run: |
-          VERSION="${{ steps.download.outputs.firmware_version }}"
-          DIR="Firmware $VERSION"
           
-          if [ -d "$DIR" ]; then
-            # Suppression des fichiers .1.nca et fragments
-            find "$DIR" -type f -name "*.[0-9].nca" -delete
-            find "$DIR" -type f -name "*.nca.*" -delete
-
-            # Extraction des SystemVersion NCA (fichiers de ~128KB)
-            # On cherche les fichiers NCA et on les trie par taille pour identifier les SystemVersion
-            SV_FAT=$(ls -S "$DIR"/*.nca | tail -n 2 | head -n 1 | xargs basename)
-            SV_EXFAT=$(ls -S "$DIR"/*.nca | tail -n 1 | xargs basename)
-
-            # Création du changelog personnalisé
-            echo "Archive created: Firmware $VERSION.zip" > changelog_body.txt
-            echo "SystemVersion NCA FAT: $SV_FAT" >> changelog_body.txt
-            echo "SystemVersion NCA exFAT: $SV_EXFAT" >> changelog_body.txt
-            echo "Verify hashes before installation!" >> changelog_body.txt
-
-            # Compression
-            zip -rj "Firmware $VERSION.zip" "$DIR/" -i "*.nca"
-          else
-            echo "Dossier non trouvé"
-            exit 1
-          fi
+          # Exécution SANS paramètre pour que le script interroge lui-même l'API Nintendo
+          python3 firmware_downloader.py | tee script_output.log
+          echo "firmware_version=$VERSION" >> $GITHUB_OUTPUT
+          
+          # Extraction stricte des dernières lignes générées par le script Python
+          sed -n '/Archive created:/,$p' script_output.log > changelog_body.txt
+          
+          # Stockage sécurisé et multi-lignes du texte pour GitHub Actions
+          EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+          echo "CHANGELOG_CONTENT<<$EOF" >> $GITHUB_ENV
+          cat changelog_body.txt >> $GITHUB_ENV
+          echo "$EOF" >> $GITHUB_ENV
 
       - name: 📦 Create Tag and Release
         if: steps.version_check.outputs.new_version == 'true'
@@ -119,12 +100,10 @@ jobs:
           tag_name: ${{ steps.download.outputs.firmware_version }}
           name: Firmware ${{ steps.download.outputs.firmware_version }}
           body: |
-            Automatic download of the official Nintendo Switch firmware version **${{ steps.download.outputs.firmware_version }}**.
+            Automatic download of the official Nintendo Switch firmware version ${{ steps.download.outputs.firmware_version }}.
             
-            **Downloaded file details:**
-            ```text
-            $(cat changelog_body.txt)
-            ```
+            Downloaded file details:
+            ${{ env.CHANGELOG_CONTENT }}
           files: |
             Firmware ${{ steps.download.outputs.firmware_version }}.zip
         env:
