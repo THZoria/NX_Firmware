@@ -4,7 +4,6 @@
 import os
 import hashlib
 import warnings
-import locale
 from struct import unpack
 from binascii import hexlify
 from glob import glob
@@ -22,9 +21,10 @@ from requests.exceptions import HTTPError
 
 try:
     from anynet import tls
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.backends import default_backend
 except ImportError:
-    # Minimal fallback before i18n initialization
-    print("Module 'anynet' not found / introuvable. Install it with: pip install anynet")
+    print("Module(s) missing. Install with: pip install anynet cryptography requests")
     exit(1)
 
 warnings.filterwarnings("ignore")
@@ -32,28 +32,6 @@ warnings.filterwarnings("ignore")
 ENV     = "lp1"
 VERSION = argv[1] if len(argv) > 1 else ""
 
-# ==========================================
-# I18N (INTERNATIONALIZATION) SETUP
-# ==========================================
-def detect_language():
-    try:
-        # getlocale() may return (None, None) on some systems, fallback to env vars
-        lang, _ = locale.getlocale()
-        if not lang:
-            lang = os.environ.get('LANG', 'en')
-        return 'fr' if lang.lower().startswith('fr') else 'en'
-    except Exception:
-        return 'en'
-
-USER_LANG = detect_language()
-
-def _(en_str: str, fr_str: str) -> str:
-    """Returns the translated string based on the user's OS language."""
-    return fr_str if USER_LANG == 'fr' else en_str
-
-# ==========================================
-# UTILITY FUNCTIONS
-# ==========================================
 def readdata(f, addr, size):
     f.seek(addr)
     return f.read(size)
@@ -93,7 +71,7 @@ def dlfile(url, out, user_agent):
             f"--out={out}", "-c", url
         ], check=True, stdout=PIPE, stderr=PIPE)
     except FileNotFoundError:
-        print(_(f"Downloading {basename(out)} via requests...", f"Téléchargement de {basename(out)} via requests..."))
+        print(f"Downloading {basename(out)} via requests...")
         resp = request(
             "GET", url,
             cert=("keys/switch_client.crt", "keys/switch_client.key"),
@@ -121,9 +99,7 @@ def dlfiles(dltable, user_agent):
             "-x", "16", "-s", "16", "-i", "dl.tmp"
         ], check=True)
     except FileNotFoundError:
-        # OPTIMIZATION: Use multithreading if aria2c is missing instead of sequential downloads.
-        print(_("aria2c not found. Using parallel requests fallback (16 threads).", 
-                "aria2c introuvable. Utilisation du fallback de requêtes parallèles (16 threads)."))
+        print("aria2c not found. Using parallel requests fallback (16 threads).")
         with ThreadPoolExecutor(max_workers=16) as executor:
             futures = []
             for url, dirc, fname, fhash in dltable:
@@ -132,7 +108,7 @@ def dlfiles(dltable, user_agent):
                 futures.append(executor.submit(dlfile, url, out, user_agent))
             
             for future in as_completed(futures):
-                future.result() # Raises exceptions if any occurred during thread execution
+                future.result() 
     finally:
         try:
             remove("dl.tmp")
@@ -154,24 +130,22 @@ def nin_request(method, url, user_agent, headers=None):
 def parse_cnmt(nca):
     ncaf = basename(nca)
     
-    # --- KEY MODIFICATION ---
-    # Force the use of the hactool executable in the current directory.
-    # In the workflow, hactool-linux was renamed to hactool and made executable.
     hactool_bin = "hactool.exe" if os.name == "nt" else "./hactool" 
-    # -----------------------
-    
     cnmt_temp_dir = f"cnmt_tmp_{ncaf}"
     
-    run(
-        [hactool_bin, "-k", "prod.keys", nca, "--section0dir", cnmt_temp_dir],
-        stdout=PIPE, stderr=PIPE
-    )
+    try:
+        run(
+            [hactool_bin, "-k", "prod.keys", nca, "--section0dir", cnmt_temp_dir],
+            stdout=PIPE, stderr=PIPE
+        )
+    except FileNotFoundError:
+        print(f"\n[!] CRITICAL ERROR: '{hactool_bin}' not found.")
+        print("Please download hactool and place it in the same folder as this script.")
+        exit(1)
     
-    # Check if the extraction succeeded
     extracted_files = glob(f"{cnmt_temp_dir}/*.cnmt")
     if not extracted_files:
-        raise FileNotFoundError(_(f"Failed to extract CNMT from {ncaf}. Check prod.keys.", 
-                                  f"Échec de l'extraction CNMT de {ncaf}. Vérifiez prod.keys."))
+        raise FileNotFoundError(f"Failed to extract CNMT from {ncaf}. Check prod.keys.")
         
     cnmt_file = extracted_files[0]
     entries = []
@@ -206,6 +180,7 @@ def zipdir(src_dir, out_zip):
             for name in sorted(files):
                 full = os.path.join(root, name)
                 rel  = os.path.relpath(full, start=src_dir) 
+                
                 os.utime(full, (1780315200, 1780315200))
                 
                 zinfo = ZipInfo.from_file(full, arcname=rel)
@@ -217,10 +192,6 @@ def zipdir(src_dir, out_zip):
                 with open(full, 'rb') as f:
                     zf.writestr(zinfo, f.read())
 
-
-# ==========================================
-# CLASS ENCAPSULATION (REPLACING GLOBALS)
-# ==========================================
 class FirmwareDownloader:
     def __init__(self, device_id: str, ver_string_simple: str):
         self.device_id = device_id
@@ -228,7 +199,6 @@ class FirmwareDownloader:
         self.user_agent = f"NintendoSDK Firmware/11.0.0-0 (platform:NX; did:{self.device_id}; eid:{ENV})"
         self.ver_dir = f"Firmware {self.ver_string_simple}"
         
-        # Isolated States
         self.update_files = []
         self.update_dls = []
         self.sv_nca_fat = ""
@@ -251,8 +221,7 @@ class FirmwareDownloader:
             ).headers["X-Nintendo-Content-ID"]
         except HTTPError as e:
             if e.response is not None and e.response.status_code == 404:
-                print(_(f"INFO: Title {title_id} version {version} not found (404).", 
-                        f"INFO : Titre {title_id} version {version} introuvable (404)."))
+                print(f"INFO: Title {title_id} version {version} not found (404).")
                 if title_id.lower() == "010000000000081b":
                     self.sv_nca_exfat = ""
                 return
@@ -291,13 +260,9 @@ class FirmwareDownloader:
     def run_downloads(self):
         dlfiles(self.update_dls, self.user_agent)
 
-# ==========================================
-# MAIN EXECUTION
-# ==========================================
 if __name__ == "__main__":
     if not exists("certificat.pem"):
-        print(_("File 'certificat.pem' not found in root directory.", 
-                "Fichier 'certificat.pem' introuvable dans le répertoire racine."))
+        print("File 'certificat.pem' not found in root directory.")
         exit(1)
         
     pem_data = open("certificat.pem", "rb").read()
@@ -308,8 +273,7 @@ if __name__ == "__main__":
     priv.save("keys/switch_client.key", tls.TYPE_PEM)
 
     if not exists("prod.keys"):
-        print(_("File 'prod.keys' not found in root directory.", 
-                "Fichier 'prod.keys' introuvable dans le répertoire racine."))
+        print("File 'prod.keys' not found in root directory.")
         exit(1)
         
     prod_keys = ConfigParser(strict=False)
@@ -317,23 +281,49 @@ if __name__ == "__main__":
         prod_keys.read_string("[keys]\n" + f.read())
 
     if not exists("PRODINFO.bin"):
-        print(_("File 'PRODINFO.bin' not found in root directory.", 
-                "Fichier 'PRODINFO.bin' introuvable dans le répertoire racine."))
+        print("File 'PRODINFO.bin' not found in root directory.")
         exit(1)
         
     with open("PRODINFO.bin", "rb") as pf:
-        if pf.read(4) != b"CAL0":
-            print(_("Invalid PRODINFO (invalid header)!", 
-                    "PRODINFO invalide (en-tête incorrect) !"))
+        prod_data = pf.read()
+
+    if prod_data[:4] == b"CAL0":
+        decrypted_prod = prod_data
+    else:
+        bis_key_00_hex = prod_keys.get("keys", "bis_key_00", fallback=None)
+        if not bis_key_00_hex:
+            print("PRODINFO is encrypted but bis_key_00 is missing from prod.keys!")
             exit(1)
-        device_id = utf8(readdata(pf, 0x2b56, 0x10))
-        print(_(f"Device ID: {device_id}", f"ID de l'appareil (Device ID) : {device_id}"))
+            
+        bis_key_00 = bytes.fromhex(bis_key_00_hex.strip())
+        sector_size = 0x4000
+        decrypted_prod = bytearray()
+        backend = default_backend()
+
+        for i in range(0, len(prod_data), sector_size):
+            chunk = prod_data[i:i+sector_size]
+            if len(chunk) < 16:
+                decrypted_prod += chunk
+                continue
+                
+            tweak = (i // sector_size).to_bytes(16, 'little')
+            cipher = Cipher(algorithms.AES(bis_key_00), modes.XTS(tweak), backend=backend)
+            decryptor = cipher.decryptor()
+            decrypted_prod += decryptor.update(chunk)
+            
+        decrypted_prod = bytes(decrypted_prod)
+
+    if decrypted_prod[:4] != b"CAL0":
+        print("Invalid PRODINFO (Decryption failed or invalid header)!")
+        exit(1)
+        
+    device_id = decrypted_prod[0x2b56 : 0x2b56 + 0x10].decode("utf-8").strip('\x00')
+    print(f"Device ID: {device_id}")
 
     user_agent = f"NintendoSDK Firmware/11.0.0-0 (platform:NX; did:{device_id}; eid:{ENV})"
 
     if VERSION == "":
-        print(_("INFO: No version specified, searching for the latest version...", 
-                "INFO : Aucune version spécifiée, recherche de la dernière version en cours..."))
+        print("INFO: No version specified, searching for the latest version...")
         su_meta = nin_request(
             "GET",
             f"https://sun.hac.{ENV}.d4c.nintendo.net/v1/system_update_meta?device_id={device_id}",
@@ -360,33 +350,28 @@ if __name__ == "__main__":
 
     downloader = FirmwareDownloader(device_id, ver_string_simple)
     
-    print(_(f"Downloading firmware. Internal version: {ver_string_raw}. Folder: {downloader.ver_dir}", 
-            f"Téléchargement du firmware. Version interne : {ver_string_raw}. Dossier : {downloader.ver_dir}"))
+    print(f"Downloading firmware. Internal version: {ver_string_raw}. Folder: {downloader.ver_dir}")
 
     downloader.dltitle("0100000000000816", ver_raw, is_su=True)
     downloader.run_downloads()
 
     if not downloader.sv_nca_exfat:
-        print(_("INFO: exFAT not found via meta — direct attempt 010000000000081b...", 
-                "INFO : exFAT introuvable via les métadonnées — tentative directe 010000000000081b..."))
+        print("INFO: exFAT not found via meta — direct attempt 010000000000081b...")
         downloader.dltitle("010000000000081b", ver_raw, is_su=False)
         if downloader.sv_nca_exfat:
             downloader.run_downloads()
         else:
-            print(_("INFO: No separate SystemVersion exFAT found for this firmware version.", 
-                    "INFO : Aucun SystemVersion exFAT séparé trouvé pour cette version du firmware."))
+            print("INFO: No separate SystemVersion exFAT found for this firmware version.")
 
     failed = False
     for fpath in downloader.update_files:
         if not exists(fpath):
-            print(_(f"DOWNLOAD FAILED: {fpath} missing", 
-                    f"ÉCHEC DU TÉLÉCHARGEMENT : {fpath} manquant"))
+            print(f"DOWNLOAD FAILED: {fpath} missing")
             failed = True
     if failed:
         exit(1)
 
-    print(_("\nINFO: Starting detailed verification of NCA hashes...", 
-            "\nINFO : Démarrage de la vérification détaillée des hachages NCA..."))
+    print("\nINFO: Starting detailed verification of NCA hashes...")
             
     hash_failed = False
     for url, dirc, fname, expected_hash in downloader.update_dls:
@@ -399,27 +384,21 @@ if __name__ == "__main__":
             actual_hash = h.hexdigest()
             if actual_hash == expected_hash:
                 print(f"[OK] {fname}")
-                print(_(f"     -> Verified Hash: {actual_hash}", 
-                        f"     -> Hachage vérifié : {actual_hash}"))
+                print(f"     -> Verified Hash: {actual_hash}")
             else:
-                print(f"[ERROR / ERREUR] {fname}")
-                print(_(f"        Expected : {expected_hash}", 
-                        f"        Attendu  : {expected_hash}"))
-                print(_(f"        Actual   : {actual_hash}", 
-                        f"        Actuel   : {actual_hash}"))
+                print(f"[ERROR] {fname}")
+                print(f"        Expected : {expected_hash}")
+                print(f"        Actual   : {actual_hash}")
                 hash_failed = True
         else:
-            print(_(f"[MISSING] {fname}", 
-                    f"[MANQUANT] {fname}"))
+            print(f"[MISSING] {fname}")
             hash_failed = True
 
     if hash_failed:
-        print(_("\nCRITICAL: Hash verification failed for one or more files. Archive will not be created.", 
-                "\nCRITIQUE : La vérification du hachage a échoué pour un ou plusieurs fichiers. L'archive ne sera pas créée."))
+        print("\nCRITICAL: Hash verification failed for one or more files. Archive will not be created.")
         exit(1)
     else:
-        print(_("\nINFO: All files successfully verified against CNMT records.", 
-                "\nINFO : Tous les fichiers ont été vérifiés avec succès d'après les enregistrements CNMT."))
+        print("\nINFO: All files successfully verified against CNMT records.")
 
     out_zip = f"{downloader.ver_dir}.zip" 
     if exists(out_zip):
@@ -432,14 +411,9 @@ if __name__ == "__main__":
             h.update(chunk)
     zip_sha256 = h.hexdigest()
 
-    print(_("\nDOWNLOAD COMPLETE!", "\nTÉLÉCHARGEMENT TERMINÉ !"))
-    print(_(f"Archive created: {out_zip}", 
-            f"Archive créée : {out_zip}"))
-    print(_(f"SystemVersion NCA FAT: {downloader.sv_nca_fat or 'Not Found'}", 
-            f"SystemVersion NCA FAT : {downloader.sv_nca_fat or 'Introuvable'}"))
-    print(_(f"SystemVersion NCA exFAT: {downloader.sv_nca_exfat or 'Not Found'}", 
-            f"SystemVersion NCA exFAT : {downloader.sv_nca_exfat or 'Introuvable'}"))
-    print(_(f"Archive SHA256: {zip_sha256}", 
-            f"Archive SHA256 : {zip_sha256}"))
-    print(_("Verify hashes before installation!", 
-            "Vérifiez les hachages avant l'installation !"))
+    print("\nDOWNLOAD COMPLETE!")
+    print(f"Archive created: {out_zip}")
+    print(f"SystemVersion NCA FAT: {downloader.sv_nca_fat or 'Not Found'}")
+    print(f"SystemVersion NCA exFAT: {downloader.sv_nca_exfat or 'Not Found'}")
+    print(f"Archive SHA256: {zip_sha256}")
+    print("Verify hashes before installation!")
