@@ -12,7 +12,7 @@ on:
         default: false
 
 env:
-  BUILD_NSP: ${{ inputs.build_nsp == 'true' && 'true' || 'false' }}
+  BUILD_NSP: ${{ inputs.build_nsp == true && 'true' || 'false' }}
 
 jobs:
   check_update:
