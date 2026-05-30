@@ -227,7 +227,7 @@ def parse_cnmt(nca):
                     c.seek(base + i*0x10)
                     title_id = unpack("<Q", c.read(8))[0]
                     version  = unpack("<I", c.read(4))[0]
-                    entries.append((ihexify(title_id, 8), version))
+                    entries.append((ihexify(title_id, 8), version, None))
             else:
                 n_entries = readshort(c, 0x10)
                 offset    = readshort(c, 0xe)
@@ -422,7 +422,7 @@ class FirmwareDownloader:
         )
 
         if is_su:
-            for t_id, ver in parse_cnmt(cnmt_nca):
+            for t_id, ver, _ in parse_cnmt(cnmt_nca):
                 self.dltitle(t_id, ver)
         else:
             for nca_id, nca_hash, entry_type in parse_cnmt(cnmt_nca):
@@ -572,8 +572,8 @@ if __name__ == "__main__":
                 print(f"     -> Verified Hash: {actual_hash}")
             else:
                 print(f"[ERROR] {fname}")
-                print(f"        Expected : {expected_hash}")
-                print(f"        Actual   : {actual_hash}")
+                print(f"         Expected : {expected_hash}")
+                print(f"         Actual   : {actual_hash}")
                 hash_failed = True
         else:
             print(f"[MISSING] {fname}")
