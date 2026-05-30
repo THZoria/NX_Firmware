@@ -119,6 +119,7 @@ jobs:
           gh release create "$VERSION" "${ASSETS[@]}" \
             --title "Firmware $VERSION (v$V_N - $VER_RAW)" \
             --notes "Automatic download of the official Nintendo Switch firmware version $VERSION.
+          
           ---
           **PS: The NSP file is intended for preservation purposes only. Please use the ZIP archive for emulators and Switch hardware instead.**
           
