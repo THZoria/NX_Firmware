@@ -593,7 +593,7 @@ if __name__ == "__main__":
     print("Verify hashes before installation!")
     
     if repacker_success:
-        print("\n<details>\n<summary>Click to view NSP details</summary>\n")
+        print("\n<details>\n<summary>Click to view NSP details </summary>\n")
         print(f"NSP created: {out_nsp}")
         print(f"SHA256: {nsp_sha256}\n</details>")
     elif choix_nsp in ['', 'y', 'yes', 'true']:
