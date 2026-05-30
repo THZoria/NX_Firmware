@@ -91,28 +91,27 @@ jobs:
           python3 firmware_downloader.py | tee script_output.log
           echo "firmware_version=$VERSION" >> "$GITHUB_OUTPUT"
           
-          sed -n '/Archive créée/,$p' script_output.log > changelog_body.txt
+          # Extraction stricte du Internal version (ver_raw)
+          VER_RAW=$(grep "Internal version:" script_output.log | sed -E 's/.*Internal version: ([0-9]+).*/\1/')
+          echo "VER_RAW=$VER_RAW" >> "$GITHUB_ENV"
+          
+          sed -n '/Archive created:/,$p' script_output.log > changelog_body.txt
           
           EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
           echo "CHANGELOG_CONTENT<<$EOF" >> "$GITHUB_ENV"
           cat changelog_body.txt >> "$GITHUB_ENV"
           echo "$EOF" >> "$GITHUB_ENV"
 
-      - name: 📦 Upload NSP as Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Firmware-${{ steps.download.outputs.firmware_version }}-NSP
-          path: "*.nsp"
-          retention-days: 14
-
       - name: 📦 Create Tag and Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.download.outputs.firmware_version }}
         run: |
-          gh release create "$VERSION" "Firmware ${VERSION}.zip" \
-            --title "Firmware $VERSION" \
-            --notes "Automatic download of the official Nintendo Switch firmware version $VERSION.
+          gh release create "$VERSION" "Firmware ${VERSION}.zip" "Firmware ${VERSION}.nsp" \
+            --title "Firmware $VERSION (v$VERSION - v${VER_RAW})" \
+            --notes "Firmware $VERSION (v$VERSION - v${VER_RAW})
+            
+            Automatic download of the official Nintendo Switch firmware.
             
             Downloaded file details:
             ${CHANGELOG_CONTENT}"
