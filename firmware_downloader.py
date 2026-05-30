@@ -3,6 +3,7 @@
 
 import os
 import sys
+import time
 import hashlib
 import warnings
 from struct import unpack, pack
@@ -36,6 +37,47 @@ VERSION = argv[1] if len(argv) > 1 else ""
 
 BASE_DIR = dirname(abspath(__file__))
 KEYS_DIR = join(BASE_DIR, "keys")
+
+def input_with_timeout(prompt, timeout=30):
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    if os.name == 'nt':
+        import msvcrt
+        start_time = time.time()
+        response = ""
+        while time.time() - start_time < timeout:
+            if msvcrt.kbhit():
+                c = msvcrt.getch()
+                if c in (b'\r', b'\n'):
+                    sys.stdout.write('\n')
+                    sys.stdout.flush()
+                    return response
+                elif c == b'\x08':
+                    if len(response) > 0:
+                        response = response[:-1]
+                        sys.stdout.write('\b \b')
+                        sys.stdout.flush()
+                else:
+                    try:
+                        char = c.decode('utf-8')
+                        response += char
+                        sys.stdout.write(char)
+                        sys.stdout.flush()
+                    except UnicodeDecodeError:
+                        pass
+            time.sleep(0.05)
+        sys.stdout.write("\n[Timeout reached. Defaulting to 'n']\n")
+        sys.stdout.flush()
+        return "n"
+    else:
+        import select
+        i, o, e = select.select([sys.stdin], [], [], timeout)
+        if i:
+            return sys.stdin.readline().strip()
+        else:
+            sys.stdout.write("\n[Timeout reached. Defaulting to 'n']\n")
+            sys.stdout.flush()
+            return "n"
 
 def readdata(f, addr, size):
     f.seek(addr)
@@ -542,33 +584,27 @@ if __name__ == "__main__":
 
     is_ci = os.environ.get("GITHUB_ACTIONS") == "true"
     
+    out_zip = f"{downloader.ver_dir}.zip"
+    out_zip_path = join(BASE_DIR, out_zip)
+    if exists(out_zip_path):
+        remove(out_zip_path)
+    zipdir(downloader.ver_dir, out_zip)
+    
+    h = hashlib.sha256()
+    with open(out_zip_path, "rb") as f:
+        for chunk in iter(lambda: f.read(1048576), b""):
+            h.update(chunk)
+    zip_sha256 = h.hexdigest()
+
     if is_ci:
-        choix_zip = "y"
         choix_nsp = "y"
     else:
-        choix_zip = input("Do you want to create a standard ZIP archive? [Y/n]: ").strip().lower()
-        
-    out_zip = f"{downloader.ver_dir}.zip"
-    zip_sha256 = ""
-    if choix_zip in ['', 'y', 'yes', 'true']:
-        out_zip_path = join(BASE_DIR, out_zip)
-        if exists(out_zip_path):
-            remove(out_zip_path)
-        zipdir(downloader.ver_dir, out_zip)
-        
-        h = hashlib.sha256()
-        with open(out_zip_path, "rb") as f:
-            for chunk in iter(lambda: f.read(1048576), b""):
-                h.update(chunk)
-        zip_sha256 = h.hexdigest()
-
-    if not is_ci:
-        choix_nsp = input("Do you want to pack the raw files into an NSP container? [Y/n]: ").strip().lower()
+        choix_nsp = input_with_timeout("\nDo you want to pack the raw files into an NSP? [y/N]: ", 30).strip().lower()
         
     out_nsp = f"{downloader.ver_dir}.nsp"
     nsp_sha256 = ""
     repacker_success = False
-    if choix_nsp in ['', 'y', 'yes', 'true']:
+    if choix_nsp in ['y', 'yes', 'true']:
         out_nsp_path = join(BASE_DIR, out_nsp)
         if exists(out_nsp_path):
             remove(out_nsp_path)
@@ -593,9 +629,16 @@ if __name__ == "__main__":
     print("Verify hashes before installation!")
     
     if repacker_success:
-        print("\n<details>\n<summary>Click to view NSP details </summary>\n")
-        print(f"NSP created: {out_nsp}")
-        print(f"SHA256: {nsp_sha256}\n</details>")
-    elif choix_nsp in ['', 'y', 'yes', 'true']:
-        print("\n<details>\n<summary>Click to view NSP details</summary>\n")
-        print("Note: NSP compilation failed. Only the ZIP archive is provided.\n</details>")
+        if is_ci:
+            print("\n<details>\n<summary>Click to view NSP details </summary>\n")
+            print(f"NSP created: {out_nsp}")
+            print(f"SHA256: {nsp_sha256}\n</details>")
+        else:
+            print(f"\nNSP created: {out_nsp}")
+            print(f"SHA256: {nsp_sha256}")
+    elif choix_nsp in ['y', 'yes', 'true']:
+        if is_ci:
+            print("\n<details>\n<summary>Click to view NSP details</summary>\n")
+            print("Note: NSP compilation failed. Only the ZIP archive is provided.\n</details>")
+        else:
+            print("\nNote: NSP compilation failed. Only the ZIP archive is provided.")
