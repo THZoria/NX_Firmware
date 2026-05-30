@@ -88,7 +88,7 @@ jobs:
         run: |
           VERSION="${{ needs.check_update.outputs.firmware_version }}"
           
-          python3 firmware_downloader.py "$VERSION" | tee script_output.log
+          python3 firmware_downloader.py | tee script_output.log
           echo "firmware_version=$VERSION" >> "$GITHUB_OUTPUT"
           
           VER_RAW=$(grep "Internal version:" script_output.log | sed -E 's/.*Internal version: ([0-9]+).*/\1/')
