@@ -4,6 +4,16 @@ on:
   schedule:
     - cron: '0 * * * *'
   workflow_dispatch:
+    inputs:
+      build_nsp:
+        description: 'Build NSP file ?'
+        required: true
+        type: boolean
+        default: true
+
+env:
+  # Si lancé manuellement sur "false", ça passe à false. Sinon (cron ou "true"), ça reste true.
+  BUILD_NSP: ${{ inputs.build_nsp == 'false' && 'false' || 'true' }}
 
 jobs:
   check_update:
@@ -88,7 +98,13 @@ jobs:
         run: |
           VERSION="${{ needs.check_update.outputs.firmware_version }}"
           
-          python3 firmware_downloader.py | tee script_output.log
+          # Si build_nsp est sur false, on cache "GITHUB_ACTIONS" et on simule un "n" pour zapper la création
+          if [ "${{ env.BUILD_NSP }}" == "false" ]; then
+            echo "n" | env -u GITHUB_ACTIONS python3 firmware_downloader.py | tee script_output.log
+          else
+            python3 firmware_downloader.py | tee script_output.log
+          fi
+          
           echo "firmware_version=$VERSION" >> "$GITHUB_OUTPUT"
           
           VER_RAW=$(grep "Internal version:" script_output.log | sed -E 's/.*Internal version: ([0-9]+).*/\1/')
@@ -116,9 +132,9 @@ jobs:
             ASSETS+=("Firmware ${VERSION}.nsp")
           fi
           
-          gh release create "$VERSION" "${ASSETS[@]}" \
-            --title "Firmware $VERSION (v$V_N - $VER_RAW)" \
-            --notes "Automatic download of the official Nintendo Switch firmware version $VERSION.
+          # On adapte le message de la release en fonction du choix
+          if [ "${{ env.BUILD_NSP }}" == "true" ]; then
+            NOTES="Automatic download of the official Nintendo Switch firmware version $VERSION.
           
           ---
           **PS: The NSP file is intended for preservation purposes only. Please use the ZIP archive for emulators and Switch hardware instead.**
@@ -126,3 +142,14 @@ jobs:
           Downloaded file details:
           
           ${CHANGELOG_CONTENT}"
+          else
+            NOTES="Automatic download of the official Nintendo Switch firmware version $VERSION.
+
+          Downloaded file details:
+          
+          ${CHANGELOG_CONTENT}"
+          fi
+          
+          gh release create "$VERSION" "${ASSETS[@]}" \
+            --title "Firmware $VERSION (v$V_N - $VER_RAW)" \
+            --notes "$NOTES"
