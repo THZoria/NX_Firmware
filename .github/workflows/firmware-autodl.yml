@@ -26,7 +26,6 @@ jobs:
             exit 0
           fi
 
-          # Extraction stricte Switch 1 (hac) + Tri version
           LATEST_VERSION=$(echo "$RSS" | tr -d '\n' | sed 's/<item>/\n<item>/g' | \
             grep 'sys=hac' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -n 1)
 
@@ -41,7 +40,6 @@ jobs:
             exit 0
           fi
 
-          # Check si la Release existe
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/$LATEST_VERSION")
@@ -73,7 +71,7 @@ jobs:
 
       - name: ⚙️ Install required Python modules
         run: |
-          pip install requests anynet beautifulsoup4
+          pip install requests anynet cryptography tqdm
 
       - name: ⬇️ Setup hactool-linux
         run: |
@@ -90,25 +88,28 @@ jobs:
         run: |
           VERSION="${{ needs.check_update.outputs.firmware_version }}"
           
-          # Exécution SANS paramètre pour que le script interroge lui-même l'API Nintendo
           python3 firmware_downloader.py | tee script_output.log
           echo "firmware_version=$VERSION" >> "$GITHUB_OUTPUT"
           
-          # Extraction stricte des dernières lignes générées par le script Python
-          sed -n '/Archive created:/,$p' script_output.log > changelog_body.txt
+          sed -n '/Archive créée/,$p' script_output.log > changelog_body.txt
           
-          # Stockage sécurisé et multi-lignes du texte pour GitHub Actions
           EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
           echo "CHANGELOG_CONTENT<<$EOF" >> "$GITHUB_ENV"
           cat changelog_body.txt >> "$GITHUB_ENV"
           echo "$EOF" >> "$GITHUB_ENV"
+
+      - name: 📦 Upload NSP as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Firmware-${{ steps.download.outputs.firmware_version }}-NSP
+          path: "*.nsp"
+          retention-days: 14
 
       - name: 📦 Create Tag and Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.download.outputs.firmware_version }}
         run: |
-          # Utilisation du client natif GitHub (gh) pour une exécution ultra-rapide et propre
           gh release create "$VERSION" "Firmware ${VERSION}.zip" \
             --title "Firmware $VERSION" \
             --notes "Automatic download of the official Nintendo Switch firmware version $VERSION.
