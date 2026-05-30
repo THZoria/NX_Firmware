@@ -115,7 +115,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.download.outputs.firmware_version }}
         run: |
-          V_N=$(( ${VER_RAW:-0} / 65536 ))
+          RAW=${VER_RAW:-0}
+          MAJOR=$(( (RAW >> 26) & 0x3F ))
+          MINOR=$(( (RAW >> 20) & 0x3F ))
+          MICRO=$(( (RAW >> 16) & 0xF ))
           
           ASSETS=()
           if [ -f "Firmware ${VERSION}.zip" ]; then
@@ -141,5 +144,5 @@ jobs:
           fi
           
           gh release create "$VERSION" "${ASSETS[@]}" \
-            --title "Firmware $VERSION (v$V_N - $VER_RAW)" \
+            --title "Firmware $VERSION (v$MAJOR.$MINOR.$MICRO - $RAW)" \
             --notes-file release_notes.md
