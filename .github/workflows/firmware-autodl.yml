@@ -7,13 +7,12 @@ on:
     inputs:
       build_nsp:
         description: 'Build NSP file ?'
-        required: true
+        required: false
         type: boolean
-        default: true
+        default: false
 
 env:
-  # Si lancé manuellement sur "false", ça passe à false. Sinon (cron ou "true"), ça reste true.
-  BUILD_NSP: ${{ inputs.build_nsp == 'false' && 'false' || 'true' }}
+  BUILD_NSP: ${{ inputs.build_nsp == 'true' && 'true' || 'false' }}
 
 jobs:
   check_update:
