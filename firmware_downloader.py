@@ -594,7 +594,7 @@ if __name__ == "__main__":
     
     if repacker_success:
         print("\n<details>\n<summary>Click to view NSP details</summary>\n")
-        print(f"also, NSP created: {out_nsp}")
+        print(f"NSP created: {out_nsp}")
         print(f"SHA256: {nsp_sha256}\n</details>")
     elif choix_nsp in ['', 'y', 'yes', 'true']:
         print("\n<details>\n<summary>Click to view NSP details</summary>\n")
