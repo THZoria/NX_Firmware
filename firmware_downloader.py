@@ -257,11 +257,13 @@ def zipdir(src_dir, out_zip):
                     full = os.path.join(root, name)
                     rel  = os.path.relpath(full, start=src_dir_path) 
                     os.utime(full, (1780315200, 1780315200))
+                    
                     zinfo = ZipInfo.from_file(full, arcname=rel)
                     zinfo.date_time = (2026, 1, 1, 0, 0, 0)
                     zinfo.create_system = 0
                     zinfo.external_attr = 0 
                     zinfo.compress_type = ZIP_STORED
+                    
                     with open(full, 'rb') as f:
                         zf.writestr(zinfo, f.read())
                     pbar.update(1)
@@ -445,6 +447,7 @@ class FirmwareDownloader:
 
     def run_downloads(self):
         dlfiles(self.update_dls, self.user_agent)
+
 
 if __name__ == "__main__":
     cert_path = join(BASE_DIR, "certificat.pem")
