@@ -98,14 +98,14 @@ def dlfile(url, out, user_agent, session=None):
         chunk_size = 1024 * 1024
         
         with open(out, mode) as f:
-            with tqdm(total=total_size, initial=dlded, unit='B', unit_scale=True, desc=f"DL {name}", leave=False) as pbar:
+            with tqdm(total=total_size, initial=dlded, unit='B', unit_scale=True, desc=f"Downloading {name}", leave=False) as pbar:
                 for chunk in resp.iter_content(chunk_size=chunk_size):
                     if chunk:
                         f.write(chunk)
                         pbar.update(len(chunk))
                         
     except Exception as e:
-        print(f"\n[!] Error during requests download of {basename(out)}: {e}")
+        print(f"\n[!] Error downloading {basename(out)}: {e}")
         raise
 
 def dlfiles(dltable, user_agent):
@@ -125,7 +125,7 @@ def dlfiles(dltable, user_agent):
             "-x", "16", "-s", "16", "-i", dl_tmp_path
         ], check=True)
     except FileNotFoundError:
-        print("aria2c not found. Using parallel requests fallback (requests + tqdm).")
+        print("aria2c not found. Using parallel requests fallback.")
         with requests.Session() as global_session:
             with ThreadPoolExecutor(max_workers=8) as executor:
                 futures = []
@@ -490,7 +490,8 @@ if __name__ == "__main__":
         ver_raw = parts[0]*0x4000000 + parts[1]*0x100000 + parts[2]*0x10000 + parts[3]
 
     downloader = FirmwareDownloader(device_id, ver_string_simple)
-    print(f"Downloading firmware. Internal version: {ver_raw}. Folder: {downloader.ver_dir}")
+    v_n = ver_raw // 65536
+    print(f"Downloading firmware. Internal version: {ver_raw} (v{v_n}). Folder: {downloader.ver_dir}")
     
     downloader.dltitle("0100000000000816", ver_raw, is_su=True)
     downloader.run_downloads()
@@ -582,14 +583,19 @@ if __name__ == "__main__":
                 for chunk in iter(lambda: f.read(1048576), b""):
                     h.update(chunk)
             nsp_sha256 = h.hexdigest()
-        else:
-            sys.exit(1)
 
     print("\nDOWNLOAD COMPLETE!")
     if zip_sha256:
-        print(f"Archive created: {out_zip} (SHA256: {zip_sha256})")
-    if repacker_success:
-        print(f"NSP created: {out_nsp} (SHA256: {nsp_sha256})")
+        print(f"Archive created: {out_zip}")
+        print(f"SHA256: {zip_sha256}\n")
     print(f"SystemVersion NCA FAT: {downloader.sv_nca_fat or 'Not Found'}")
-    print(f"SystemVersion NCA exFAT: {downloader.sv_nca_exfat or 'Not Found'}")
+    print(f"SystemVersion NCA exFAT: {downloader.sv_nca_exfat or 'Not Found'}\n")
     print("Verify hashes before installation!")
+    
+    if repacker_success:
+        print("\n<details>\n<summary>Click to view NSP details</summary>\n")
+        print(f"also, NSP created: {out_nsp}")
+        print(f"SHA256: {nsp_sha256}\n</details>")
+    elif choix_nsp in ['', 'y', 'yes', 'true']:
+        print("\n<details>\n<summary>Click to view NSP details</summary>\n")
+        print("Note: NSP compilation failed. Only the ZIP archive is provided.\n</details>")
