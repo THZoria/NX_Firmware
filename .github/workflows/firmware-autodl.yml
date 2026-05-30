@@ -97,7 +97,6 @@ jobs:
         run: |
           VERSION="${{ needs.check_update.outputs.firmware_version }}"
           
-          # Si build_nsp est sur false, on cache "GITHUB_ACTIONS" et on simule un "n" pour zapper la création
           if [ "${{ env.BUILD_NSP }}" == "false" ]; then
             echo "n" | env -u GITHUB_ACTIONS python3 firmware_downloader.py | tee script_output.log
           else
@@ -116,7 +115,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.download.outputs.firmware_version }}
         run: |
-          # Évite un plantage si VER_RAW est vide grâce à la valeur par défaut :-0
           V_N=$(( ${VER_RAW:-0} / 65536 ))
           
           ASSETS=()
@@ -127,7 +125,6 @@ jobs:
             ASSETS+=("Firmware ${VERSION}.nsp")
           fi
           
-          # Construction sécurisée du fichier markdown des notes de version (évite les bugs d'escape Bash)
           echo "Automatic download of the official Nintendo Switch firmware version $VERSION." > release_notes.md
           echo "" >> release_notes.md
           
@@ -143,7 +140,6 @@ jobs:
             cat changelog_body.txt >> release_notes.md
           fi
           
-          # Publication de la release en utilisant le fichier de notes généré
           gh release create "$VERSION" "${ASSETS[@]}" \
             --title "Firmware $VERSION (v$V_N - $VER_RAW)" \
             --notes-file release_notes.md
