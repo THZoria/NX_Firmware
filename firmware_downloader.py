@@ -105,7 +105,7 @@ def dlfile(url, out, user_agent, session=None):
                         pbar.update(len(chunk))
                         
     except Exception as e:
-        print(f"\n[!] Erreur lors du téléchargement par requêtes de {basename(out)} : {e}")
+        print(f"\n[!] Error during requests download of {basename(out)}: {e}")
         raise
 
 def dlfiles(dltable, user_agent):
@@ -125,6 +125,7 @@ def dlfiles(dltable, user_agent):
             "-x", "16", "-s", "16", "-i", dl_tmp_path
         ], check=True)
     except FileNotFoundError:
+        print("aria2c not found. Using parallel requests fallback (requests + tqdm).")
         with requests.Session() as global_session:
             with ThreadPoolExecutor(max_workers=8) as executor:
                 futures = []
@@ -164,13 +165,13 @@ def parse_cnmt(nca):
     try:
         run([hactool_path, "-k", join(BASE_DIR, "prod.keys"), nca, "--section0dir", cnmt_temp_dir], stdout=PIPE, stderr=PIPE)
     except FileNotFoundError:
-        print(f"\n[!] ERREUR CRITIQUE: '{hactool_bin}' introuvable dans {BASE_DIR}.")
+        print(f"\n[!] CRITICAL ERROR: '{hactool_bin}' not found in {BASE_DIR}.")
         sys.exit(1)
     
     try:
         extracted_files = glob(join(cnmt_temp_dir, "*.cnmt"))
         if not extracted_files:
-            raise FileNotFoundError(f"Échec de l'extraction CNMT depuis {ncaf}. Vérifie prod.keys.")
+            raise FileNotFoundError(f"Failed to extract CNMT from {ncaf}. Check prod.keys.")
             
         cnmt_file = extracted_files[0]
         entries = []
@@ -202,13 +203,12 @@ def parse_cnmt(nca):
             rmtree(cnmt_temp_dir)
 
 def zipdir(src_dir, out_zip):
-    print(f"Création de l'archive ZIP : {basename(out_zip)}...")
     src_dir_path = join(BASE_DIR, src_dir)
     out_zip_path = join(BASE_DIR, out_zip)
     total_files = sum(len(files) for _, _, files in os.walk(src_dir_path))
     
     with ZipFile(out_zip_path, "w", compression=ZIP_STORED) as zf:
-        with tqdm(total=total_files, unit='fichiers', desc="Compression ZIP") as pbar:
+        with tqdm(total=total_files, unit='files', desc="Compressing ZIP") as pbar:
             for root, dirs, files in os.walk(src_dir_path):
                 dirs.sort()
                 for name in sorted(files):
@@ -243,17 +243,15 @@ class NSPRepacker:
 
     def repack(self):
         self._sort_pfs0_order()
-        print(f"\n[*] Repacking {len(self.sorted_files)} components into NSP...")
         hd = self._gen_header()
         self.expected_total_size = len(hd) + sum(getsize(file) for file in self.sorted_files)
         
         if exists(self.path) and getsize(self.path) == self.expected_total_size:
-            print(f"[*] Repack {self.path} already exists and size matches!")
             return self.path
             
         with open(self.path, 'wb') as outf:
             outf.write(hd)
-            with tqdm(total=sum(getsize(f) for f in self.sorted_files), unit='B', unit_scale=True, desc="    Repacking NSP", leave=False) as pbar:
+            with tqdm(total=sum(getsize(f) for f in self.sorted_files), unit='B', unit_scale=True, desc="Repacking NSP", leave=False) as pbar:
                 for file in self.sorted_files:
                     with open(file, 'rb') as inf:
                         while True:
@@ -263,11 +261,9 @@ class NSPRepacker:
                             outf.write(buf)
                             pbar.update(len(buf))
                             
-        print(f"[+] Local Repack Complete. Proceeding to Deep Integrity Audit...")
         return self.path
 
     def verify_integrity(self):
-        print(f"[*] Deep Integrity Audit for {basename(self.path)}...")
         try:
             with open(self.path, "rb") as f:
                 magic = f.read(4)
@@ -296,7 +292,6 @@ class NSPRepacker:
                 if actual_size != self.expected_total_size:
                     return False
                     
-            print("[+] PFS0 Container mathematically verified (Magic, Structure, Boundaries, and Size).")
             return True
         except Exception:
             return False
@@ -362,7 +357,7 @@ class FirmwareDownloader:
             ).headers["X-Nintendo-Content-ID"]
         except HTTPError as e:
             if e.response is not None and e.response.status_code == 404:
-                print(f"INFO: Titre {title_id} version {version} introuvable (404).")
+                print(f"INFO: Title {title_id} version {version} not found (404).")
                 if title_id.lower() == "010000000000081b":
                     self.sv_nca_exfat = ""
                 return
@@ -412,7 +407,7 @@ class FirmwareDownloader:
 if __name__ == "__main__":
     cert_path = join(BASE_DIR, "certificat.pem")
     if not exists(cert_path):
-        print(f"Fichier 'certificat.pem' introuvable dans {BASE_DIR}.")
+        print(f"File 'certificat.pem' not found in {BASE_DIR}.")
         sys.exit(1)
         
     with open(cert_path, "rb") as f:
@@ -426,7 +421,7 @@ if __name__ == "__main__":
 
     prod_keys_path = join(BASE_DIR, "prod.keys")
     if not exists(prod_keys_path):
-        print(f"Fichier 'prod.keys' introuvable dans {BASE_DIR}.")
+        print(f"File 'prod.keys' not found in {BASE_DIR}.")
         sys.exit(1)
         
     prod_keys = ConfigParser(strict=False)
@@ -435,7 +430,7 @@ if __name__ == "__main__":
 
     prodinfo_path = join(BASE_DIR, "PRODINFO.bin")
     if not exists(prodinfo_path):
-        print(f"Fichier 'PRODINFO.bin' introuvable dans {BASE_DIR}.")
+        print(f"File 'PRODINFO.bin' not found in {BASE_DIR}.")
         sys.exit(1)
         
     with open(prodinfo_path, "rb") as pf:
@@ -446,6 +441,7 @@ if __name__ == "__main__":
     else:
         bis_key_00_hex = prod_keys.get("keys", "bis_key_00", fallback=None)
         if not bis_key_00_hex:
+            print("PRODINFO is encrypted but bis_key_00 is missing from prod.keys!")
             sys.exit(1)
             
         bis_key_00 = bytes.fromhex(bis_key_00_hex.strip())
@@ -467,6 +463,7 @@ if __name__ == "__main__":
         decrypted_prod = bytes(decrypted_prod)
 
     if decrypted_prod[:4] != b"CAL0":
+        print("Invalid PRODINFO (Decryption failed or invalid header)!")
         sys.exit(1)
         
     device_id = decrypted_prod[0x2b56 : 0x2b56 + 0x10].decode("utf-8").strip('\x00')
@@ -474,6 +471,7 @@ if __name__ == "__main__":
     base_session = requests.Session()
 
     if VERSION == "":
+        print("INFO: No version specified, searching for the latest version...")
         su_meta = nin_request(
             "GET",
             f"https://sun.hac.{ENV}.d4c.nintendo.net/v1/system_update_meta?device_id={device_id}",
@@ -492,18 +490,28 @@ if __name__ == "__main__":
         ver_raw = parts[0]*0x4000000 + parts[1]*0x100000 + parts[2]*0x10000 + parts[3]
 
     downloader = FirmwareDownloader(device_id, ver_string_simple)
+    print(f"Downloading firmware. Internal version: {ver_raw}. Folder: {downloader.ver_dir}")
+    
     downloader.dltitle("0100000000000816", ver_raw, is_su=True)
     downloader.run_downloads()
 
     if not downloader.sv_nca_exfat:
+        print("INFO: exFAT not found via meta — direct attempt 010000000000081b...")
         downloader.dltitle("010000000000081b", ver_raw, is_su=False)
         if downloader.sv_nca_exfat:
             downloader.run_downloads()
+        else:
+            print("INFO: No separate SystemVersion exFAT found for this firmware version.")
 
+    failed = False
     for fpath in downloader.update_files:
         if not exists(fpath):
-            sys.exit(1)
+            print(f"DOWNLOAD FAILED: {fpath} missing")
+            failed = True
+    if failed:
+        sys.exit(1)
 
+    print("\nINFO: Starting detailed verification of NCA hashes...")
     hash_failed = False
     for url, dirc, fname, expected_hash in downloader.update_dls:
         fpath = join(BASE_DIR, dirc, fname)
@@ -512,24 +520,36 @@ if __name__ == "__main__":
             with open(fpath, "rb") as f:
                 for chunk in iter(lambda: f.read(1048576), b""):
                     h.update(chunk)
-            if h.hexdigest() != expected_hash:
+            actual_hash = h.hexdigest()
+            if actual_hash == expected_hash:
+                print(f"[OK] {fname}")
+                print(f"     -> Verified Hash: {actual_hash}")
+            else:
+                print(f"[ERROR] {fname}")
+                print(f"        Expected : {expected_hash}")
+                print(f"        Actual   : {actual_hash}")
                 hash_failed = True
         else:
+            print(f"[MISSING] {fname}")
             hash_failed = True
 
     if hash_failed:
+        print("\nCRITICAL: Hash verification failed for one or more files. Archive will not be created.")
         sys.exit(1)
+    else:
+        print("\nINFO: All files successfully verified against CNMT records.")
 
     is_ci = os.environ.get("GITHUB_ACTIONS") == "true"
     
     if is_ci:
-        choix_zip = "o"
-        choix_nsp = "o"
+        choix_zip = "y"
+        choix_nsp = "y"
     else:
-        choix_zip = input("Voulez-vous créer une archive ZIP classique ? [O/n] : ").strip().lower()
+        choix_zip = input("Do you want to create a standard ZIP archive? [Y/n]: ").strip().lower()
         
-    if choix_zip in ['', 'o', 'oui', 'y', 'yes', 'true']:
-        out_zip = f"{downloader.ver_dir}.zip" 
+    out_zip = f"{downloader.ver_dir}.zip"
+    zip_sha256 = ""
+    if choix_zip in ['', 'y', 'yes', 'true']:
         out_zip_path = join(BASE_DIR, out_zip)
         if exists(out_zip_path):
             remove(out_zip_path)
@@ -539,13 +559,15 @@ if __name__ == "__main__":
         with open(out_zip_path, "rb") as f:
             for chunk in iter(lambda: f.read(1048576), b""):
                 h.update(chunk)
-        print(f"Archive créée : {out_zip} (SHA256: {h.hexdigest()})")
+        zip_sha256 = h.hexdigest()
 
     if not is_ci:
-        choix_nsp = input("Voulez-vous empaqueter les fichiers bruts dans un conteneur NSP ? [O/n] : ").strip().lower()
+        choix_nsp = input("Do you want to pack the raw files into an NSP container? [Y/n]: ").strip().lower()
         
-    if choix_nsp in ['', 'o', 'oui', 'y', 'yes', 'true']:
-        out_nsp = f"{downloader.ver_dir}.nsp"
+    out_nsp = f"{downloader.ver_dir}.nsp"
+    nsp_sha256 = ""
+    repacker_success = False
+    if choix_nsp in ['', 'y', 'yes', 'true']:
         out_nsp_path = join(BASE_DIR, out_nsp)
         if exists(out_nsp_path):
             remove(out_nsp_path)
@@ -554,10 +576,20 @@ if __name__ == "__main__":
         repacker.repack()
         
         if repacker.verify_integrity():
+            repacker_success = True
             h = hashlib.sha256()
             with open(out_nsp_path, "rb") as f:
                 for chunk in iter(lambda: f.read(1048576), b""):
                     h.update(chunk)
-            print(f"Fichier NSP créé : {out_nsp} (SHA256: {h.hexdigest()})")
+            nsp_sha256 = h.hexdigest()
         else:
             sys.exit(1)
+
+    print("\nDOWNLOAD COMPLETE!")
+    if zip_sha256:
+        print(f"Archive created: {out_zip} (SHA256: {zip_sha256})")
+    if repacker_success:
+        print(f"NSP created: {out_nsp} (SHA256: {nsp_sha256})")
+    print(f"SystemVersion NCA FAT: {downloader.sv_nca_fat or 'Not Found'}")
+    print(f"SystemVersion NCA exFAT: {downloader.sv_nca_exfat or 'Not Found'}")
+    print("Verify hashes before installation!")
